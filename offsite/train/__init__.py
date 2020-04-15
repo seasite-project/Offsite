@@ -1,0 +1,3 @@
+"""@package train
+Training functions.
+"""
