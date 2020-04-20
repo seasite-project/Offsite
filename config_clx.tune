@@ -1,9 +1,0 @@
-[BENCHMARK]
-RepetitionsCommunicationOperations = 100
-
-[CODEGEN]
-yasksite_stencil_dir = examples/ivps/yasksite_stencils
-
-[YASKSITE]
-folding = 8:1:1; 1:8:1; 1:1:8; 2:2:2; 1:2:4
-blocking = plain; spatial
