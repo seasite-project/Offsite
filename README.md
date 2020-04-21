@@ -1,6 +1,6 @@
 # README
 
-Offsite is an offline autotuning framework, currently specialized on explicit ODE methods. Offsite can automatically derive implementation variants from user-provided abstract YAML description formats and then rates these variants based on the analytic ECM performance model. Currently supports x86 architectures: Intel and AMD. Two different backends are currently supported to derived the required ECM performance model contributions: (1) [kerncraft](https://github.com/RRZE-HPC/kerncraft) (2) [YaskSite](https://github.com/seasite-project/YaskSite)
+Offsite is an offline autotuning framework, currently specialized on explicit ODE methods. Offsite can automatically derive implementation variants from user-provided abstract YAML description formats and then rates these variants based on the analytic ECM performance model. Currently supports x86 architectures: Intel and AMD. Two different backends are currently supported to derived the required ECM performance model contributions: (1) [kerncraft](https://github.com/RRZE-HPC/kerncraft) and (2) [YaskSite](https://github.com/seasite-project/YaskSite).
 
 
 ### Features ###
