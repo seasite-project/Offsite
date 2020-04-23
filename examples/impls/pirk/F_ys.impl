@@ -1,0 +1,13 @@
+code: |
+  %COM omp_barrier
+  %KERNEL ys_RHS_LC_predictor
+  %COM omp_barrier
+  %LOOP_START k m-1
+  %CMD SWAP Yprev Ycur double**
+  %KERNEL ys_RHS_LC Yprev[i]
+  %COM omp_barrier
+  %LOOP_END k
+  %CMD SWAP Yprev Ycur double**
+  %KERNEL ys_RHS_Approx_Update Yprev[i]
+codegen:
+    datastructs: "Y2sn_pFs.h"  

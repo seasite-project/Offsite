@@ -1,0 +1,14 @@
+ivp_dependent: true
+datastructs:
+  - double@ dt
+  - double dy[n]
+computations:
+  A: "y_new = y_old + dt * dy"
+variants:
+  - name: ys_Update_j
+    code: |
+      %COMP A
+    pmodel :
+      - iterations: n
+        working sets: { "2*n" }
+model_tool: yasksite

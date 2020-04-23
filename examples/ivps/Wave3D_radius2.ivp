@@ -1,0 +1,33 @@
+model_tool: yasksite
+ODE grid dim: cbrt(n)
+characteristics:
+  - sparse
+  - stencil
+  - stencil_dim: 3
+  - stencil_radius: 2
+constants:
+  - double g2 = g * g
+  - double v2 = 7.2
+  - double c0 = 1.2
+  - double c1 = 0.6
+  - double c2 = 0.4
+components:
+  - type: memory-bound
+    first: g2
+    size: n-g2
+    code: |
+       2 * %in[j] - %in_old[j] + v2 * (c2 * %in[j-g2-1] + c1 * %in[j-g2] + c2 * %in[j-g-1] + c1* %in[j-g] + c2 * %in[j-2] + c1 * %in[j-1] - c0 * %in[j] + c1 * %in[j+1] + c2 * %in[j+2] + c1 * %in[j+g] + c2 * %in[j+g+1] + c1 * %in[j+g2] + c2 * %in[j+g2+1])
+codegen:
+  stencil: YASKSITE_STENCIL_DIR/Wave3D_offsite.hpp
+  initial_values: |
+    int last = g - 1;
+    int middle = g / 2;
+    for (int i = 0; i <= last; ++i)
+      for (int j = 0; j <= last; ++j)
+        for (int k = 0; k <= last; ++k)
+          if (i%last==0 || j%last==0 || k%last==0)
+            %in[(i * i)  * g + j * g + k] = 50.0;
+          else if (i==middle && j==middle && k==middle)
+            %in[(i * i)  * g + j * g + k] = 1000.0;
+          else
+            %in[(i * i)  * g + j * g + k] = 0.0;

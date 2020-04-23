@@ -1,0 +1,29 @@
+model_tool: yasksite
+ODE grid dim: cbrt(n)
+characteristics:
+  - sparse
+  - stencil
+  - stencil_dim: 3
+  - stencil_radius: 1
+constants:
+  - double g2 = g * g
+components:
+  - type: memory-bound
+    first: g2
+    size: n-g2
+    code: |
+      %in[j-g2] + %in[j-g] + %in[j-1] - 6 * %in[j] + %in[j+1] + %in[j+g] + %in[j+g2]
+codegen:
+  stencil: YASKSITE_STENCIL_DIR/Heat3D_offsite.hpp
+  initial_values: |
+    int last = g - 1;
+    int middle = g / 2;
+    for (int i = 0; i <= last; ++i)
+      for (int j = 0; j <= last; ++j)
+        for (int k = 0; k <= last; ++k)
+          if (i%last==0 || j%last==0 || k%last==0)
+            %in[(i * i)  * g + j * g + k] = 50.0;
+          else if (i==middle && j==middle && k==middle)
+            %in[(i * i)  * g + j * g + k] = 1000.0;
+          else
+            %in[(i * i)  * g + j * g + k] = 0.0;

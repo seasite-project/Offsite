@@ -1,0 +1,19 @@
+ivp_dependent: false
+datastructs:
+  - double h
+  - double y[n]
+  - double dy[n]
+computations:
+  A: "y[j] += h * dy[j]"
+variants:
+  - name: Update_j
+    code: |
+      %PRAGMA nounroll_and_jam
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %COMP A
+      %LOOP_END j
+    pmodel :
+      - iterations: n
+        working sets: { "2*n" }
+model_tool: kerncraft

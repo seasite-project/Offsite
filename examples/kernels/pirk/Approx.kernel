@@ -1,0 +1,35 @@
+ivp_dependent: false
+datastructs:
+  - double b[s]
+  - double F[s][n]
+  - double dy[n]
+computations:
+  A: "dy[j] += b[i] * F[i][j]"
+variants:
+  - name: Approx_ij
+    code: |
+      %PRAGMA nounroll_and_jam
+      %LOOP_START i s
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %COMP A
+      %LOOP_END j
+      %LOOP_END i
+    pmodel:
+      - iterations: s*n
+        working sets: { "(s+1)*n+s", "2*n" }
+  - name: Approx_ji
+    code: |
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %LOOP_START i s unroll
+      %COMP A
+      %LOOP_END i
+      %LOOP_END j
+    pmodel:
+      - iterations: n
+        working sets: { "(s+1)*n+s" }
+codegen:
+  loop splits:
+    - i 0
+model_tool: kerncraft

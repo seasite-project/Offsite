@@ -1,0 +1,20 @@
+ivp_dependent: true
+datastructs:
+  - double@ dt
+  - double Yprev[s][n]
+  - double c[s]
+computations:
+  A: "Ycur[i] = %RHS"
+variants:
+  - name: ys_RHS_predictor_jl
+    code: |
+      %LOOP_START i s unroll 0 assign 0
+        %COMP A
+      %LOOP_END i
+    pmodel :
+      - iterations: "n"
+        working sets: { "2*s*n+s" }
+codegen:
+  RHS_input: "y_old"
+  RHS_butcher_nodes: "c[i]"
+model_tool: yasksite

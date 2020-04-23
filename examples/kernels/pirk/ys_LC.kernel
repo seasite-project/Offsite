@@ -1,0 +1,35 @@
+ivp_dependent: true
+datastructs:
+  - double Y[s][n]
+  - double F[s][n]
+  - double tmp_arr[s]
+  - double@ h
+computations:
+  A: "tmp_arr[l] +=  A[l][i] * F[i]"
+  B: "Y[l] = tmp_arr[l] * h + y_old"
+variants:
+  - name : ys_LC_jil
+    code: |
+      %LOOP_START i s unroll 1 assign 0
+      %LOOP_START l s unroll 0
+        %COMP A
+      %LOOP_END l
+      %LOOP_END i
+      %LOOP_START l s unroll 2
+        %COMP B
+      %LOOP_END l
+    pmodel :
+      - iterations : "n"
+        working sets: { "(2*s+1)*n+s*s" }
+  - name : ys_LC_jli
+    code: |
+      %LOOP_START l s unroll 1 assign 0
+      %LOOP_START i s unroll 0
+        %COMP A
+      %LOOP_END i
+        %COMP B
+      %LOOP_END l
+    pmodel :
+      - iterations : "n"
+        working sets: { "(2*s+1)*n+s*s" }
+model_tool: yasksite

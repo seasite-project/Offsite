@@ -1,0 +1,44 @@
+model_tool: kerncraft
+ODE grid dim: n
+characteristics:
+- sparse
+constants:
+- double U_op = 5.0
+- double U_op_scaling = 1.0
+- double U_thres = 1.0
+- double R = 5e3
+- double C = 1e-3
+- double eta = 2e-4
+- double freq = 0.0125
+components:
+- type: compute-bound
+  first: 1
+  size: n - 1
+  code: |
+   (((U_op - %in[j]) * R - (eta * ((%in[j-1] - U_thres) * (%in[j-1] - U_thres) - (%in[j-1] - %in[j] - U_thres) * (%in[j-1] - %in[j] - U_thres)))) / C)
+codegen:
+  eval_range: |
+    #pragma ivdep
+    for (int j = first; j <= last; j++)
+    {
+      double U_previous = ((j == 0) ? U_op_scaling * U_op * sin(2 * M_PI * t * freq - M_PI / 2) * 0.5 + (U_op_scaling * U_op * 0.5) : %in[j - 1]);
+      double U_j = %in[j];
+    
+      double max1 = max(U_previous - U_thres, 0.0);
+      double max2 = max(U_previous - U_j - U_thres, 0.0);
+      double ids = eta * (max1 * max1 - max2 * max2);
+  
+      f[j] = ((U_op - U_j) / R - ids) / C;
+    }
+  eval_component: |
+    double U_previous = ((j == 0) ? U_op_scaling * U_op * sin(2 * M_PI * t * freq - M_PI / 2) * 0.5 + (U_op_scaling * U_op * 0.5) : %in[j - 1]);
+    double U_j = %in[j];
+    
+    double max1 = max(U_previous - U_thres, 0.0);
+    double max2 = max(U_previous - U_j - U_thres, 0.0);
+    double ids = eta * (max1 * max1 - max2 * max2);
+  
+    return ((U_op - U_j) / R - ids) / C;
+  initial_values: |
+    for (int j = 0; j < n; j++)
+      %in[j] = ((j + 1) % 2) * U_op_scaling * U_op;

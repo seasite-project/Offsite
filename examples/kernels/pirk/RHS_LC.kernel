@@ -1,0 +1,39 @@
+ivp_dependent: true
+datastructs:
+  - double t
+  - double c[s]
+  - double Yprev[s][n]
+  - double Ycur[s][n]
+  - double A[s][s]
+  - double h
+  - double f[1]
+  - double y[n]
+computations:
+  A: "f[0] = %RHS"
+  B: "Ycur[l][j] += A[l][i] * f[0]"
+  C: "Ycur[l][j] = Ycur[l][j] * h + y[j]"
+variants:
+  - name : RHS_LC_jil
+    code: |
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %LOOP_START i s unroll 1
+      %COMP A
+      %LOOP_START l s unroll 0
+      %COMP B
+      %LOOP_END l
+      %LOOP_END i
+      %LOOP_START l s unroll 2
+      %COMP C
+      %LOOP_END l
+      %LOOP_END j
+    pmodel :
+      - iterations : "n"
+        working sets: { "2*s*n+n+s*s" }
+codegen:
+  loop splits:
+    - i 0
+  RHS: "eval_component"
+  RHS_input: "Yprev[i]"
+  RHS_butcher_nodes: "c[i]"
+model_tool: kerncraft

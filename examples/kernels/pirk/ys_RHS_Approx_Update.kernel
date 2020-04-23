@@ -1,0 +1,22 @@
+ivp_dependent: true
+datastructs:
+  - double Yprev[s][n]
+  - double tmp
+  - double@ dt
+computations:
+  A: "tmp += b[l] * %RHS"
+  B: "y_new = y_old + dt * tmp"
+variants:
+  - name: ys_RHS_Approx_Update_jl
+    code: |
+      %LOOP_START l s unroll 0 assign 0
+        %COMP A
+      %LOOP_END l
+      %COMP B
+    pmodel :
+      - iterations: n
+        working sets: { "(s+1)*n+s", "2*n" }
+codegen:
+  RHS_input: "Yprev[l]"
+  RHS_butcher_nodes: "c[l]"
+model_tool: yasksite
