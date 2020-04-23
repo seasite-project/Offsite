@@ -24,6 +24,6 @@ See [install.sh](https://github.com/seasite-project/Offsite/blob/master/install.
 ### How to run? ###
 
 * `offsite_tune -h` (to get help and options)
-* Some example tuning scenarios can be found in [examples](https://github.com/seasite-project/Offsite/tree/master/examples) folder. Let's try IVP InverterChain with backend kerncraft:
+* Some example tuning scenarios can be found in [examples](https://github.com/seasite-project/Offsite/tree/master/examples) folder. Let's try IVP InverterChain with backend kerncraft for a fixed ODE size of n=50,000:
 * `offsite_tune --machine examples/machines/CascadelakeSP_Gold-6248.yml --compiler icc --impl examples/impls/pirk/ --kernel examples/kernels/pirk/ --method examples/methods/implicit/radauIIA7.ode --ivp examples/ivps/InverterChain.ivp --bench examples/bench/OMP_BARRIER_CascadelakeSP_Gold-6248_icc19.0.2.187.bench --tool kerncraft -n 50000 --verbose`
 * For an example on using YaskSite as backend follow this [link](https://github.com/seasite-project/SC20-YASKSITE-AD/blob/master/README.md).
