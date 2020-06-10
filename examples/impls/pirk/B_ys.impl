@@ -1,0 +1,13 @@
+code: |
+  %COM omp_barrier
+  %KERNEL ys_RHS y
+  %LOOP_START k m
+    %COM omp_barrier
+    %KERNEL ys_LC
+    %COM omp_barrier
+    %KERNEL ys_RHS
+  %LOOP_END k
+  %COM omp_barrier
+  %KERNEL ys_ApproxUpdate
+codegen:
+  datastructs: "Ysn_Fsn.h"

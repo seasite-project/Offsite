@@ -23,8 +23,8 @@ variants:
         working sets: { "(2*s+1)*n+s*s" }
   - name : ys_LC_jli
     code: |
-      %LOOP_START l s unroll 1 assign 0
-      %LOOP_START i s unroll 0
+      %LOOP_START l s unroll 1 
+      %LOOP_START i s unroll 0 assign 0
         %COMP A
       %LOOP_END i
         %COMP B

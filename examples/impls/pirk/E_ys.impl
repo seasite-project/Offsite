@@ -1,0 +1,10 @@
+code: |
+  %COM omp_barrier
+  %LOOP_START k m
+    %KERNEL ys_RHS_LC
+    %COM omp_barrier
+  %LOOP_END k
+  %KERNEL ys_RHS_Approx
+  %KERNEL ys_Update
+codegen:
+  datastructs: "Y2sn_pFs.h"

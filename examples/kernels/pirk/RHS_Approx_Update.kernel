@@ -1,6 +1,7 @@
 ivp_dependent: true
 datastructs:
   - double t
+  - double g
   - double c[s]
   - double y[n]
   - double dy[n]

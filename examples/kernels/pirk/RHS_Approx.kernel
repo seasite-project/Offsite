@@ -1,0 +1,40 @@
+ivp_dependent: true
+datastructs:
+  - double t
+  - double g
+  - double c[s]
+  - double y[n]
+  - double dy[n]
+  - double b[s]
+computations:
+  A: "dy[j] += b[i] * (%RHS)"
+variants:
+  - name : RHS_Approx_ij
+    code: |
+      %LOOP_START i s
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %COMP A
+      %LOOP_END j
+      %LOOP_END i
+    pmodel :
+      - iterations : "s*n"
+        working sets: { "(s+1)*n+s", "2*n" }
+  - name : RHS_Approx_ji
+    code: |
+      %PRAGMA ivdep
+      %LOOP_START j n
+      %LOOP_START i s unroll 0 assign 0
+      %COMP A
+      %LOOP_END i
+      %LOOP_END j
+    pmodel :
+      - iterations : "n"
+        working sets: { "(s+1)*n+s" }
+codegen:
+  loop splits:
+    - i 0
+  RHS: "eval_component"
+  RHS_input: "Y[i]"
+  RHS_butcher_nodes: "c[i]"
+model_tool: kerncraft
