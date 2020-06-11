@@ -36,9 +36,6 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
     -
     """
     config = offsite.config.offsiteConfig
-    machine_id = machine.db_id
-    compiler_id = machine.compiler.db_id
-    frequency = machine.clock
     # Select all benchmarks required by at least one ImplSkeleton object.
     required_benchmarks = set()
     for skeleton in skeletons:
@@ -76,11 +73,11 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
         if data['frequency'] != frequency:
             raise RuntimeError(
                 'Passed benchmark data \'{}\' were raised for different CPU frequency \'{} Hz\'! Data for frequency '
-                '\'{} Hz\'! required!'.format(config.args.bench, data['frequency'], frequency))
+                '\'{} Hz\'! required!'.format(config.args.bench, data['frequency'], machine.clock))
         # Convert data to Benchmark records.
         bench_name = data['benchmark']
-        bench_data[bench_name] = [BenchmarkRecord(bench_name, machine_id, compiler_id, row[1], frequency, row[0])
-                                  for row in data['data']]
+        bench_data[bench_name] = [BenchmarkRecord(
+            bench_name, machine.db_id, machine.compiler.db_id, row[1], machine.clock, row[0]) for row in data['data']]
     # Run benchmarks and store the benchmark data obtained in the database.
     for benchmark in required_benchmarks:
         # If 'update_mode' is set check if benchmark was already run for the given configuration of machine and compiler
@@ -92,7 +89,7 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
         # Use passed benchmark data if available
         bench_name = benchmark.name
         if bench_name in bench_data:
-            data = bench_data[bench_name]
+            data = bench_data.get(bench_name)
         # else run benchmark.
         else:
             data = benchmark.run(machine, config.repetitions_communication_operations)

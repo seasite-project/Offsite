@@ -114,6 +114,60 @@ def execute_yasksite_ecm_mode(kernel: Path, machine: Machine, method: ODEMethod,
     return execute_yasksite(kernel, machine, 'ECM', size, timesteps, radius, optimization_parameters, stencil_abs_path)
 
 
+def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMethod, ivp: IVP, iterations: int,
+                                optimization_parameters: Dict[str, str]) -> str:
+    """Run the yasksite tool in benchmark mode with a given kernel code and return the output.
+
+    Parameters:
+    -----------
+    kernel : pathlib.Path
+        Relative path to the kernel file executed.
+    machine: Machine
+        Trained machine.
+    method: ODE method
+        Trained ODE method.
+    ivp: IVP
+        Trained IVP.
+    iterations : integer
+        Number of iterations executed by the kernel.
+    optimization_parameters : dict (key=str, value=str)
+        Applied YaskSite optimization parameters.
+
+    Returns:
+    --------
+    str
+        Output of the yasksite tool.
+    """
+    config = offsite.config.offsiteConfig
+    size = ""
+    timesteps = 1
+    radius = str(-1)
+    if method:
+        size = str(iterations) + ':1'
+        timesteps = str(method.correctorSteps)
+    if ivp:
+        grid_size = int(eval_math_expr(ivp.gridSize,
+                                       [corrector_steps(method), stages(method), ivp_system_size(iterations)]))
+        if ivp.characteristic.stencil_dim == 2:
+            size = str(grid_size) + ':' + str(grid_size)
+        elif ivp.characteristic.stencil_dim == 3:
+            size = str(grid_size) + ':' + str(grid_size) + ':' + str(grid_size)
+        else:
+            assert False
+        radius = str(ivp.characteristic.stencil_radius)
+        # Yasksite stencil file path.
+        # ... substitute stencil directory variable.
+        if 'YASKSITE_STENCIL_DIR' in ivp.code_stencil_path:
+            resolved_path = Path(ivp.code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
+        # ... absolute path.
+        stencil_abs_path = resolved_path.resolve()
+        # ... check if path exists.
+        if not stencil_abs_path.exists():
+            raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(ivp.name, stencil_abs_path))
+    return execute_yasksite(kernel, machine, 'BENCH', size, timesteps, radius, optimization_parameters,
+                            stencil_abs_path)
+
+
 def parse_yasksite_output(output: str) -> Dict[int, float]:
     """Parse yasksite's output and return the ECM results.
 

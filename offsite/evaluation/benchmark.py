@@ -130,7 +130,7 @@ class OmpBarrierBenchmark:
             # Construct compiler call.
             args = [machine.compiler.name, str(self.source), '-fopenmp', '-o{}'.format(self.binary)]
             # Add compiler flags to call.
-            args.extend([flag for flag in machine.compiler.flags.split(' ')])
+            args.extend((flag for flag in machine.compiler.flags.split(' ')))
             # Compile benchmark.
             run(args, check=True)
         except CalledProcessError as error:
@@ -289,9 +289,7 @@ class BenchmarkRecord:
                      Column('data', Float),
                      Column('frequency', Float),
                      Column('cores', Integer),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('upadtedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -392,9 +390,10 @@ class BenchmarkRecord:
         pandas.DataFrame
             Retrieved list of data records.
         """
-        query = db_session.query(
-            BenchmarkRecord.cores, BenchmarkRecord.name, BenchmarkRecord.data, BenchmarkRecord.frequency).filter(
-            BenchmarkRecord.machine.is_(machine.db_id), BenchmarkRecord.compiler.is_(machine.compiler.db_id),
-            BenchmarkRecord.name.in_(benchmarks)).order_by(BenchmarkRecord.cores, BenchmarkRecord.name)
+        query = db_session.query(BenchmarkRecord.cores, BenchmarkRecord.name, BenchmarkRecord.data,
+                                 BenchmarkRecord.frequency).filter(BenchmarkRecord.machine.is_(machine.db_id),
+                                                                   BenchmarkRecord.compiler.is_(machine.compiler.db_id),
+                                                                   BenchmarkRecord.name.in_(benchmarks)).order_by(
+            BenchmarkRecord.cores, BenchmarkRecord.name)
         data = read_sql_query(query.statement, db_session.bind, index_col='cores')
         return data

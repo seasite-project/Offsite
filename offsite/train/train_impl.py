@@ -3,6 +3,7 @@ Functions to train the tuning database with implementation variant predictions.
 """
 
 from multiprocessing import cpu_count, Pool
+from traceback import print_exc
 from typing import Dict, List
 
 from sqlalchemy.orm import Session
@@ -58,7 +59,7 @@ def train_impl_variant_predictions(db_session: Session, machine: Machine, skelet
             db_session, machine, [bench_name for bench_name in skeleton.communicationOperations.keys()])
         # ... determine all available implementation variants and store in database.
         available_variants, kernel_executions[skeleton.db_id] = deduce_available_impl_variants(
-            db_session, skeleton)
+            db_session, skeleton, config.args.filter_yasksite_opt)
         impl_variants[skeleton.db_id] = [impl.to_database(db_session) for impl in available_variants]
         # ... fetch and sort kernel runtime prediction data from the database.
         prediction_data[skeleton.db_id] = dict()
@@ -109,7 +110,7 @@ def train_impl_variant_predictions(db_session: Session, machine: Machine, skelet
     # Raise error if implementation variant prediction failed.
     if errors:
         db_session.rollback()
-        raise RuntimeError('Failed to train implementation variant predictions: {}'.format(errors[0]))
+        raise RuntimeError('Failed to train implementation variant predictions: Error in worker threads.')
     # Train database with implementation variant runtime predictions.
     ImplVariantRecord.update(db_session, records)
 
@@ -153,26 +154,33 @@ def compute_impl_variant_predictions(
     frequency = machine.clock
     # Max number of the machine's CPU cores used.
     max_cores = machine.coresPerSocket + 1
-    # Compute the communication costs of a single iteration step of this implementation skeleton for the given
-    # configuration of ODE method and IVP.
-    communication_costs = skeleton.compute_communication_costs(benchmark_data, method, ivp)
-    # Compute implementation variant run predictions
-    records = list()
-    # .. all number of cores.
-    for cores in range(1, max_cores):
-        pred_data = prediction_data[cores]
-        for impl in impl_variants:
-            # Determine number of times each kernel has to be executed for the given configuration.
-            executions = {i: eval_math_expr(e, [corrector_steps(method), stages(method), ivp_grid_size(ivp.gridSize)])
-                          for i, e in kernel_executions.items() if i in impl.kernels}
-            # Select the kernel runtime prediction data of this variant's kernels.
-            impl_pred_data = {key: pred_data[key] for key in pred_data if key in impl.kernels}
-            # ... for all sample intervals.
-            for interval, data in deduce_impl_variant_sample_intervals(impl_pred_data).items():
-                # Compute the implementation variant runtime prediction (in seconds) of this variant using
-                # the kernel runtime predictions of its kernels as well as its communication costs.
-                pred = compute_impl_variant_runtime_pred(impl.kernels, data, executions, communication_costs[cores])
-                records.append(ImplVariantRecord(
-                    impl.db_id, machine.db_id, machine.compiler.db_id, method.db_id, ivp.db_id, cores, frequency,
-                    interval, str(pred), config.args.mode.value))
-    return records
+    try:
+        # Compute the communication costs of a single iteration step of this implementation skeleton for the given
+        # configuration of ODE method and IVP.
+        communication_costs = skeleton.compute_communication_costs(benchmark_data, method, ivp)
+        # Compute implementation variant run predictions
+        records = list()
+        # .. all number of cores.
+        for cores in range(1, max_cores):
+            pred_data = prediction_data[cores]
+            for impl in impl_variants:
+                # Determine number of times each kernel has to be executed for the given configuration.
+                executions = {
+                    i: eval_math_expr(e, [corrector_steps(method), stages(method), ivp_grid_size(ivp.gridSize)]) for
+                    i, e in kernel_executions.items() if i in impl.kernels}
+                # Select the kernel runtime prediction data of this variant's kernels.
+                impl_pred_data = {key: pred_data[key] for key in pred_data if key in impl.kernels}
+                # ... for all sample intervals.
+                for interval, data in deduce_impl_variant_sample_intervals(impl_pred_data).items():
+                    # Compute the implementation variant runtime prediction (in seconds) of this variant using
+                    # the kernel runtime predictions of its kernels as well as its communication costs.
+                    pred = compute_impl_variant_runtime_pred(impl.kernels, data, executions, communication_costs[cores])
+                    records.append(
+                        ImplVariantRecord(impl.db_id, machine.db_id, machine.compiler.db_id, method.db_id, ivp.db_id,
+                                          cores, frequency, interval, str(pred), config.args.mode.value))
+        return records
+    except Exception as e:
+        # Print stack trace of the executing worker thread.
+        print_exc()
+        print('')
+        raise e

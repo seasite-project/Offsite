@@ -252,9 +252,7 @@ class KernelRecord:
                      Column('prediction', String),
                      Column('mode', String),
                      Column('weight', Float),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -432,15 +430,17 @@ class KernelRecord:
             data = db_session.query(KernelRecord).filter(
                 KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                 KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp), KernelRecord.frequency.is_(frequency),
-                KernelRecord.cores.in_([c for c in range(1, max_cores + 1)]), KernelRecord.first.is_(ode_size),
+                KernelRecord.cores.in_((c for c in range(1, max_cores + 1))), KernelRecord.first.is_(ode_size),
                 KernelRecord.last.is_(ode_size), KernelRecord.mode.is_(mode)).all()
             return bool(len(data) == max_cores)
         # ODE size is not fixed.
-        data = db_session.query(KernelRecord).filter(
-            KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
-            KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp), KernelRecord.frequency.is_(frequency),
-            KernelRecord.cores.in_([c for c in range(1, max_cores + 1)]), KernelRecord.mode.is_(mode)).order_by(
-            KernelRecord.cores.asc(), KernelRecord.first.asc()).all()
+        data = db_session.query(KernelRecord).filter(KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine),
+                                                     KernelRecord.compiler.is_(compiler),
+                                                     KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp),
+                                                     KernelRecord.frequency.is_(frequency),
+                                                     KernelRecord.cores.in_((c for c in range(1, max_cores + 1))),
+                                                     KernelRecord.mode.is_(mode)).order_by(KernelRecord.cores.asc(),
+                                                                                           KernelRecord.first.asc()).all()
         if not data:
             return False
         # Check if data for all possible ODE sizes is available.
@@ -448,7 +448,7 @@ class KernelRecord:
         cur_last = sys_maxsize
         for record in data:
             if record.cores != cur_core:
-                if cur_last != sys_maxsize and cur_last != 'inf':
+                if cur_last != sys_maxsize:
                     return False
                 cur_core = record.cores
                 if record.first != 1:
@@ -459,7 +459,7 @@ class KernelRecord:
                     return False
                 cur_last = record.last
         assert cur_core == max_cores
-        return bool(cur_last == sys_maxsize) or (cur_last == 'inf')
+        return bool(cur_last == sys_maxsize)
 
 
 @attr.s
@@ -520,9 +520,7 @@ class ImplVariantRecord:
                      Column('last', Integer),
                      Column('prediction', String),
                      Column('mode', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -658,7 +656,7 @@ class ImplVariantRecord:
 
     @staticmethod
     def select(db_session: Session, impls: List[int], machine: int, compiler: int, method: int, ivp: int,
-               frequency: float, cores: int, mode: 'ModelToolType') -> 'pandas.DataFrame':
+               frequency: float, cores: int) -> 'pandas.DataFrame':
         """Retrieve implementation variant data record(s) from the database.
 
         Return all records that match the provided configuration of machine, compiler, ODE method, IVP, CPU frequency,
@@ -682,8 +680,6 @@ class ImplVariantRecord:
             Used CPU frequency.
         cores : int
             Used number of cores.
-        mode : str
-            Application mode used to obtain data.
 
         Returns:
         --------
@@ -695,7 +691,7 @@ class ImplVariantRecord:
             filter(ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
                    ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
                    ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
-                   ImplVariantRecord.cores.is_(cores), ImplVariantRecord.mode.is_(mode)). \
+                   ImplVariantRecord.cores.is_(cores)). \
             order_by(ImplVariantRecord.impl)
         data = read_sql_query(query.statement, db_session.bind, index_col='impl')
         return data

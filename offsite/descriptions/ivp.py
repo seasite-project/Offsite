@@ -76,9 +76,7 @@ class IVP:
                      Column('code_eval_component_serial', String),
                      Column('code_stencil_path', String),
                      Column('code_initial_values_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -325,9 +323,7 @@ class IVPCharacteristic:
                      Column('computationType', String),
                      Column('stencil_radius', Integer),
                      Column('stencil_dim', Integer),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)

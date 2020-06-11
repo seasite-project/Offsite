@@ -190,8 +190,8 @@ def fetch_and_sort_kernel_runtime_prediction_data(
     return sorted_data
 
 
-def deduce_available_impl_variants(
-        db_session: Session, skeleton: ImplSkeleton) -> Tuple[List[ImplVariant], Dict[int, str]]:
+def deduce_available_impl_variants(db_session: Session, skeleton: ImplSkeleton,
+                                   filter_yasksite_opt: bool = False) -> Tuple[List[ImplVariant], Dict[int, str]]:
     """
     Deduce all available implementation variants of a given ImplSkeleton object. Therefore, the ids of the skeleton's
     KernelTemplates are selected and these are in turn used to fetch the ids of each template's actual kernel variants.
@@ -213,7 +213,6 @@ def deduce_available_impl_variants(
         Number of times the kernel variants, which can be part of the ImplSkeleton's variants, are executed when
         computing a single iteration step.
     """
-    config = offsite.config.offsiteConfig
     # Fetch the kernel variant ids from the database.
     kernel_ids = dict()
     for connect in skeleton.connected_templates:
@@ -222,7 +221,7 @@ def deduce_available_impl_variants(
     # Deduce all implementation variant permutations.
     variants = product(*kernel_ids.values())
     # Filter out all implementation variants whose kernels do not use the same optimization parameters.
-    if config.args.filter_yasksite_opt:
+    if filter_yasksite_opt:
         filtered_variants = list()
         for variant in variants:
             base_blocking = variant[0][1]['ys_blocking']
@@ -234,13 +233,12 @@ def deduce_available_impl_variants(
                 if (kernel[1]['ys_blocking'] != base_blocking) or (kernel[1]['ys_folding'] != base_folding):
                     select_variant = False
                     break
-                else:
-                    filtered_kernel_ids.append(kernel[0])
+                filtered_kernel_ids.append(kernel[0])
             if select_variant:
                 filtered_variants.append(filtered_kernel_ids)
         variants = filtered_variants
     else:
-        # Convert to lists of kernel IDs asscociated with a particular variant.
+        # Convert to lists of kernel IDs associated with a particular variant.
         variants = [[kernel[0] for kernel in variant] for variant in variants]
     # Deduce all implementation variant objects.
     variants = [ImplVariant(skeleton.db_id, variant) for variant in variants]
@@ -291,12 +289,8 @@ def deduce_impl_variant_sample_intervals(
         low_sample = None
         for pdata in pred_data.values():
             start = pdata[0][0]
-            try:
-                low_sample = pdata[0] if pdata[0][1] < end else low_sample
-                end = min(pdata[0][1], end)
-            except TypeError:
-                low_sample = pdata[0]
-                end = pdata[0][1] if end == 'inf' else end
+            low_sample = pdata[0] if pdata[0][1] < end else low_sample
+            end = min(pdata[0][1], end)
         # Add sample interval with this end value to 'impl_var_data'.
         impl_var_data[SampleInterval(start, end)] = dict()
         for kernel in pred_data:
@@ -309,8 +303,7 @@ def deduce_impl_variant_sample_intervals(
             if len(pdata) > 1 and pdata[0][0] > pdata[0][1]:
                 pdata.pop(0)
     # Add interval with 'inf' end.
-    inf_end = sys_maxsize
-    impl_var_data[SampleInterval(end, inf_end)] = dict()
+    impl_var_data[SampleInterval(end, sys_maxsize)] = dict()
     for kernel in pred_data:
-        impl_var_data[SampleInterval(end, inf_end)][kernel] = (pred_data[kernel][0][2], pred_data[kernel][0][3])
+        impl_var_data[SampleInterval(end, sys_maxsize)][kernel] = (pred_data[kernel][0][2], pred_data[kernel][0][3])
     return impl_var_data

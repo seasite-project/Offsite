@@ -15,8 +15,11 @@ from kerncraft.prefixedunit import PrefixedUnit
 from sqlalchemy import Column, DateTime, Float, Integer, String, Table, \
     UniqueConstraint
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
+import offsite.config
 from offsite import __version__
+from offsite.config import IncoreToolType
 from offsite.db import METADATA
 from offsite.db.db import insert
 from offsite.descriptions.parser_utils import load_yaml
@@ -50,9 +53,7 @@ class Compiler:
                      Column('name', String),
                      Column('version', String),
                      Column('flags', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      UniqueConstraint('name', 'version', 'flags'),
@@ -84,6 +85,30 @@ class Compiler:
         except StopIteration:
             raise RuntimeError('Compiler {} not found in YAML description!'.format(used_compiler))
         return cls(name, version, flags)
+
+    @classmethod
+    def from_database(cls, db_session: Session, compiler_id: int) -> 'Compiler':
+        """Construct Compiler object from database record.
+
+        Parameters:
+        -----------
+        db_session : sqlalchemy.orm.session.Session
+            Used database session.
+        compiler_id : int
+            Database ID of the requested Compiler object.
+
+        Returns:
+        --------
+        Compiler
+            Created Compiler object.
+        """
+        try:
+            compiler = db_session.query(Compiler).filter(Compiler.db_id.is_(compiler_id)).one()
+        except NoResultFound:
+            raise RuntimeError('Unable to load Compiler object from database!')
+        except MultipleResultsFound:
+            raise RuntimeError('Unable to load Compiler object from database!')
+        return compiler
 
     def to_database(self, db_session: Session):
         """Push this Machine object to the database.
@@ -152,7 +177,7 @@ class Machine:
     coresPerSocket = attr.ib(type=int)
     coresPerNumaDomain = attr.ib(type=int)
     numaDomainsPerSocket = attr.ib(type=int)
-    sockets = attr.ib(type=int)
+    #sockets = attr.ib(type=int)
     cachelineSize = attr.ib(type=float)
     elements_per_cacheline = attr.ib(type=float)
     l1Cache = attr.ib(type=float)
@@ -191,9 +216,7 @@ class Machine:
                      Column('flopsSpAdd', Integer),
                      Column('flopsSpFma', Integer),
                      Column('flopsSpMul', Integer),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -213,6 +236,7 @@ class Machine:
         Machine
             Created Machine object.
         """
+        config = offsite.config.offsiteConfig
         # Load YAML data.
         path = Path(yaml_path)
         yaml = load_yaml(path)
@@ -227,6 +251,8 @@ class Machine:
             micro_architecture = yaml['in-core model']['LLVM-MCA']
         else:
             assert False
+        # Attribute in-core model.
+        in_core_model = yaml['in-core model']
         # Attribute model_type.
         model_type = yaml['model type']
         # Attribute model_name.
@@ -240,7 +266,7 @@ class Machine:
         # Attribute numa_domains_per_socket.
         numa_domains_per_socket = yaml['NUMA domains per socket']
         # Attribute sockets.
-        sockets = yaml['sockets']
+        #sockets = yaml['sockets']
         # Attribute cacheline_size [in bytes].
         cacheline_size = yaml['cacheline size'].base_value()
         # Elements per cache line.
@@ -293,9 +319,45 @@ class Machine:
         compiler = Compiler.from_yaml(yaml['compiler'], used_compiler)
         # Create object.
         return cls(name, path, micro_architecture, model_type, model_name, clock, cores_per_socket,
-                   cores_per_numa_domain, numa_domains_per_socket, sockets, cacheline_size, elements_per_cacheline,
-                   l1_cache, l1_elements, l2_cache, l2_elements, l3_cache, l3_elements, flops_dp_add, flops_dp_fma,
-                   flops_dp_mul, flops_sp_add, flops_sp_fma, flops_sp_mul, compiler)
+                   cores_per_numa_domain, numa_domains_per_socket, cacheline_size, elements_per_cacheline, l1_cache,
+                   l1_elements, l2_cache, l2_elements, l3_cache, l3_elements, flops_dp_add, flops_dp_fma, flops_dp_mul,
+                   flops_sp_add, flops_sp_fma, flops_sp_mul, compiler)
+
+    @classmethod
+    def from_database(cls, db_session: Session, machine_id: int, compiler_id: int) -> 'Machine':
+        """Construct Machine object from database record.
+
+        Parameters:
+        -----------
+        db_session : sqlalchemy.orm.session.Session
+            Used database session.
+        machine_id : int
+            Database ID of the requested Machine object.
+        compiler_id : int
+            Database ID of the associated Compiler object.
+
+        Returns:
+        --------
+        Machine
+            Created Machine object.
+        """
+        try:
+            machine = db_session.query(Machine).filter(Machine.db_id.is_(machine_id)).one()
+        except NoResultFound:
+            raise RuntimeError('Unable to load Machine object from database!')
+        except MultipleResultsFound:
+            raise RuntimeError('Unable to load Machine object from database!')
+        # Attribute path.
+        # TODO
+        # Elements per cache line.
+        machine.elements_per_cacheline = machine.cachelineSize / sizeof(c_double)
+        # Cache information...
+        machine.l1CacheElements = machine.l1Cache / machine.elements_per_cacheline
+        machine.l2CacheElements = machine.l2Cache / machine.elements_per_cacheline
+        machine.l3CacheElements = machine.l3Cache / machine.elements_per_cacheline
+        # Attribute compiler.
+        machine.compiler = Compiler.from_database(db_session, compiler_id)
+        return machine
 
     def to_database(self, db_session: Session):
         """Push this Machine object to the database.
@@ -315,7 +377,7 @@ class Machine:
         if machine:
             # Supplement attributes not saved in database.
             machine.path = self.path
-            machine.sockets = self.sockets
+            #machine.sockets = self.sockets
             machine.elements_per_cacheline = self.elements_per_cacheline
             machine.l1CacheElements = self.l1CacheElements
             machine.l2CacheElements = self.l2CacheElements
@@ -326,3 +388,25 @@ class Machine:
         insert(db_session, self)
         self.compiler = self.compiler.to_database(db_session)
         return self
+
+    @staticmethod
+    def select(db_session: Session, machine_id: int, compiler_id: int) -> 'Machine':
+        """
+        Retrieve the Machine table data record and Compiler table record from the database that match the given database
+        IDs.
+
+        Parameters:
+        -----------
+        db_session: sqlalchemy.orm.session.Session
+            Used database session.
+        machine_id : int
+            ID of the requested Machine object.
+        compiler_id : int
+            ID of the requested Compiler object.
+
+        Returns:
+        --------
+        Machine
+            Machine object.
+        """
+        return Machine.from_database(db_session, machine_id, compiler_id)

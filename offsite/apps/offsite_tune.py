@@ -8,15 +8,15 @@ from time import time
 
 import offsite.config
 from offsite import __version__
-from offsite.config import ModelToolType, ProgramModeType, __bench_ext__, __config_ext__, __impl_skeleton_ext__, \
-    __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, init_config
+from offsite.config import ModelToolType, ProgramModeType, IncoreToolType, __bench_ext__, __config_ext__,\
+    __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, init_config
 from offsite.db.db import commit, close, open_db
 from offsite.db.db_mapping import mapping
 from offsite.descriptions.parser import parse_verify_yaml_desc, print_yaml_desc
 from offsite.evaluation.ranking import rank
 from offsite.train.train_communication import train_communication_costs
 from offsite.train.train_impl import train_impl_variant_predictions
-from offsite.train.train_kernel import train_kernel_predictions
+from offsite.train.train_kernel import train_kernel_predictions, train_kernel_runtimes
 
 
 def parse_program_args_app_tune() -> 'argparse.Namespace':
@@ -44,6 +44,9 @@ def parse_program_args_app_tune() -> 'argparse.Namespace':
                              'only those implementations variants and kernels predictable by the modeling tool '
                              'selected are considered in this autotuning run. By default this option is not set and '
                              'all tools are used. Available model tools: KERNCRAFT, YASKSITE')
+    parser.add_argument('--incore', action='store', type=IncoreToolType, default=IncoreToolType.OSACA,
+                        help='Select which in-core model tool Kerncraft uses internally. Available in-core models: '
+                             'OSACA(default), IACA, LLVM-MCA')
     parser.add_argument('--db', action='store', default='tune.db', help='Path to database. Default: tune.db.')
     parser.add_argument('--update', action='store_true', default=False,
                         help='Only execute autotuning steps (benchmark, performance modeling, runtime tests, ...) for '
@@ -192,3 +195,8 @@ def run():
     init_config(args)
     # Tune application.
     tune()
+
+
+# For debugging purposes.
+if __name__ == '__main__':
+    run()

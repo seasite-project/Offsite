@@ -88,21 +88,22 @@ def parse_impl_skeletons(folder: Path, templates: List[KernelTemplate], tool: Mo
     return [ImplSkeleton.from_yaml(f, templates) for f in (f for f in folder.iterdir()
                                                            if f.suffix == __impl_skeleton_ext__)]
 
-
-def parse_method(method_file: Path) -> ODEMethod:
-    """Parse ODE method description YAML file and return ODEMethod object.
+def parse_method(path: Path) -> ODEMethod:
+    """Parse ODE method description YAML file and retun ODEMethod object.
 
     Parameters:
     -----------
-    method_file : Path
-        Relative path to ODE method's description file.
+    path : Path
+        Relative path to file that contains the ODEMethod objects.
 
     Returns:
     --------
     ODEMethod
-        ODEMethod object used.
+        ODEMethod object created.
     """
-    return ODEMethod.from_yaml(method_file)
+    if not path.suffix == __ode_method_ext__:
+        raise RuntimeError('Invalid extension for ODE method: {}!'.format(path.suffix))
+    return ODEMethod.from_yaml(path)
 
 
 def parse_methods(path: Path) -> List[ODEMethod]:
@@ -119,44 +120,61 @@ def parse_methods(path: Path) -> List[ODEMethod]:
         ODEMethod objects to be used.
     """
     if path.is_file():
-        if not path.suffix == __ode_method_ext__:
-            raise RuntimeError('Invalid extension for ODE method: {}!'.format(path.suffix))
         return [parse_method(path)]
-    return [parse_method(mf) for mf in (f for f in path.iterdir() if f.suffix == __ode_method_ext__)]
+    return [ODEMethod.from_yaml(mf) for mf in (f for f in path.iterdir() if f.suffix == __ode_method_ext__)]
 
-
-def parse_ivp(ivp_file: Path) -> IVP:
+def parse_ivp(path: Path, tool: ModelToolType) -> IVP:
     """Parse IVP description YAML file and return IVP object.
 
     Parameters:
     -----------
-    ivp_file : Path
-        Relative path to IVP's description file.
+    path : str
+        Relative path to file that contains the IVP object.
+    tool : ModelToolType
+        Limit parsing to IVP objects that use this performance modelling tool.
 
     Returns:
     --------
     IVP
-        IVP object used.
+        IVP object created.
     """
-    return IVP.from_yaml(ivp_file)
+    if not path.suffix == __ivp_ext__:
+        raise RuntimeError('Invalid extension for IVP: {}!'.format(path.suffix))
+    ivp = IVP.from_yaml(path)
+    if tool and ivp.modelTool is not tool:
+        raise RuntimeError('Invalid model tool for IVP: {}!'.format(path.stem))
+    return ivp
 
 
-def parse_ivps(path: Path) -> List[IVP]:
+def parse_ivps(path: Path, tool: ModelToolType) -> List[IVP]:
     """Parse folder or file path for IVP objects.
 
     path : str
         Relative path to folder that contains the IVP objects or a particular IVP object.
+    tool : ModelToolType
+        Limit parsing to IVP objects that use this performance modelling tool.
 
     Returns:
     --------
     list of IVP
         IVP objects created.
     """
+    # Single IVP.
     if path.is_file():
-        if not path.suffix == __ivp_ext__:
-            raise RuntimeError('Invalid extension for IVP: {}!'.format(path.suffix))
-        return [parse_ivp(path)]
-    return [parse_ivp(ivpf) for ivpf in (f for f in path.iterdir() if f.suffix == __ivp_ext__)]
+        return [parse_ivp(path, tool)]
+    # Filter IVP folder.
+    if tool:
+        ivps = list()
+        for f in (f for f in path.iterdir() if f.suffix == __ivp_ext__):
+            try:
+                ivp = IVP.from_yaml(f)
+                if ivp.modelTool == tool:
+                    ivps.append(ivp)
+            except RuntimeError:
+                pass
+        return ivps
+    # Parse IVP folder.
+    return [IVP.from_yaml(ivpf) for ivpf in (f for f in path.iterdir() if f.suffix == __ivp_ext__)]
 
 
 def parse_verify_yaml_desc(db_session: Session):
@@ -197,7 +215,7 @@ def parse_verify_yaml_desc(db_session: Session):
     methods = parse_methods(args.method)
     methods = [method.to_database(db_session) for method in methods]
     # Parse the IVP descriptions.
-    ivps = parse_ivps(args.ivp)
+    ivps = parse_ivps(args.ivp, args.tool)
     ivps = [ivp.to_database(db_session) for ivp in ivps]
     # Return parsed objects.
     return machine, skeletons, templates, methods, ivps

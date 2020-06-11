@@ -52,13 +52,29 @@ class BenchType(Enum):
     OMP_BARRIER = 'OMP_BARRIER'
 
 
+class IncoreToolType(Enum):
+    """Defines what tool is used to determine the in-core model.
+
+    - IACA
+        IACA tool.
+    - OSACA
+        OSACA tool.
+    - LLVM-MCA
+        LLVM-MCA tool.
+
+    """
+    IACA = 'IACA'
+    OSACA = 'OSACA'
+    LLVMMCA = 'LLVM-MCA'
+
+
 @attr.s
 class Config:
     """Representation of a Config object.
 
     Attributes:
     -----------
-    -
+    TODO
     """
     # Program arguments
     args = attr.ib(type='argparse.Namespace')
@@ -166,4 +182,7 @@ offsiteConfig = None
 
 def init_config(args):
     global offsiteConfig
-    offsiteConfig = Config.from_file(args) if args.config else Config(args)
+    if args and args.config:
+        offsiteConfig = Config.from_file(args)
+    else:
+        offsiteConfig = Config(args)

@@ -71,49 +71,44 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
 
     # What does your project relate to?
     # keywords='',
 
-    # You can just specify the packages manually here if your project is
-    # simple. Or you can use find_packages().
     packages=find_packages(exclude=['tests*']),
 
-    # List run-time dependencies here.  These will be installed by pip when your
-    # project is installed. For an analysis of "install_requires" vs pip's
-
-    # what is not found or up-to-date on pypi we get from github:
-    # dependency_links = [''],
-
-    # https://packaging.python.org/en/latest/requirements.html
     install_requires=[
         'argparse>=1.4.0',
         'attrs>=19.3.0',
         'datetime>=4.3',
         'kerncraft>=0.8.4',
-        'numpy>=1.18.2',
+        'lark-parser>=0.8.5',
+        'matplotlib>=3.2.1',
+        'numpy>=1.18.4',
         'osaca>=0.3.3.dev0',
         'pandas>=1.0.3',
         'pathlib>=1.0.1',
         'python-pcre>=0.7',
-        'regex>=2020.4.4',
         'ruamel.yaml>=0.16.10',
         'sqlalchemy>=1.3.16',
         'sortedcontainers>=2.1.0',
         'sympy>=1.5.1',
-        'typing>=3.7.4.1'
+        'typing>=3.7.4.1',
     ],
     python_requires='>=3.6',
 
-    # To provide executable scripts, use entry points in preference to the
-    # "scripts" keyword. Entry points provide cross-platform support and allow
-    # pip to create the appropriate form of executable for the target platform.
+    package_data={
+        'offsite.codegen': ['code_dsl.lark'],
+    },
+
     entry_points={
         'console_scripts': [
-            'offsite_tune=offsite.offsite_tune:run',
-            'offsite_bench=offsite.offsite_bench:run',
-            'offsite_codegen=offsite.offsite_codegen:run'
+            'offsite_tune=offsite.apps.offsite_tune:run',
+            'offsite_bench=offsite.apps.offsite_bench:run',
+            'offsite_codegen=offsite.apps.offsite_codegen:run_db',
+            'offsite_codegen_from_yaml=offsite.apps.offsite_codegen:run_yaml',
         ],
     }
 )

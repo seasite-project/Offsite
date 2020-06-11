@@ -2,17 +2,20 @@
 Definition of class ImplSkeleton.
 """
 
+from copy import deepcopy
 from datetime import datetime
 from getpass import getuser
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import attr
+from lark import Lark
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
+from offsite.codegen.code_tree import CodeTree, CodeTreeGenerator
 from offsite.config import ModelToolType
 from offsite.db import METADATA
 from offsite.db.db import insert
@@ -31,8 +34,8 @@ class ImplSkeleton:
     -----------
     name : str
         Name of this object.
-    code : str
-        DSL representation of the implementation variant code.
+    code_tree : CodeTree
+        Tree representation of the kernel code.
     communicationOperations : dict
         Communication operations needed when executing a single iteration step.
     loops : dict
@@ -45,7 +48,7 @@ class ImplSkeleton:
         ID of associated ImplSkeleton database table record.
     """
     name = attr.ib(type=str)
-    code = attr.ib(type=str)
+    code_tree = attr.ib(type=CodeTree, hash=False)
     communicationOperations = attr.ib(type=Dict)
     loops = attr.ib(type=Dict)
     kernels = attr.ib(type=Dict)
@@ -57,6 +60,7 @@ class ImplSkeleton:
     loops_serial = attr.ib(type=str, init=False)
     kernels_serial = attr.ib(type=str, init=False)
     connected_templates_ids = attr.ib(type=str, init=False)
+    code_tree_serial = attr.ib(type=str, init=False)
     codegen_serial = attr.ib(type=str, init=False)
     db_id = attr.ib(type=int, init=False)
 
@@ -64,16 +68,14 @@ class ImplSkeleton:
     db_table = Table('impl_skeleton', METADATA,
                      Column('db_id', Integer, primary_key=True),
                      Column('name', String, unique=True),
-                     Column('code', String),
                      Column('modelTool', Enum(ModelToolType)),
                      Column('communication_operations_serial', String),
                      Column('loops_serial', String),
                      Column('kernels_serial', String),
                      Column('connected_templates_ids', String),
+                     Column('code_tree_serial', String),
                      Column('codegen_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -98,11 +100,15 @@ class ImplSkeleton:
         yaml = load_yaml(yaml_path)
         # Attribute name.
         name = yaml_path.stem
-        # Attribute code.
-        code = yaml['code']
-        # Parse code to garner attributes communication operations, loops and
-        # kernels.
-        communication_operations, loops, kernels = ImplSkeleton.parse_code(code)
+        # Attribute code_tree.
+        with open('offsite/codegen/code_dsl.lark') as f:
+            grammar = f.read()
+        parser = Lark(grammar, parser='lalr')
+        parsed_code = parser.parse(yaml['code'])
+        code_tree = CodeTreeGenerator().generate(parsed_code)
+        code_tree = deepcopy(code_tree)
+        # Parse code to garner attributes communication operations, loops and kernels.
+        communication_operations, loops, kernels = ImplSkeleton.parse_code(yaml['code'])
         # Attribute connected_templates.
         # .. used to temporarily store list of kernel templates for post init.
         connected_templates = kernel_templates
@@ -115,7 +121,7 @@ class ImplSkeleton:
                 else:
                     codegen[key] = value
         # Create object.
-        return cls(name, code, communication_operations, loops, kernels, connected_templates, codegen)
+        return cls(name, code_tree, communication_operations, loops, kernels, connected_templates, codegen)
 
     @classmethod
     def from_database(cls, db_session: Session, impl_skeleton_name: str,
@@ -142,6 +148,8 @@ class ImplSkeleton:
             raise RuntimeError('Unable to load ImplSkeleton object from database!')
         except MultipleResultsFound:
             raise RuntimeError('Unable to load ImplSkeleton object from database!')
+        # Attribute code_tree.
+        skeleton.code_tree = deserialize_obj(skeleton.code_tree_serial)
         # Attribute communicationOperations.
         skeleton.communicationOperations = deserialize_obj(skeleton.communication_operations_serial)
         # Attribute loops.
@@ -215,6 +223,7 @@ class ImplSkeleton:
                 if template[0].isIVPdependent:
                     skeleton.isIVPdependent = True
                     break
+            skeleton.code_tree = self.code_tree
             skeleton.codegen = self.codegen
             return skeleton
         # Add new object to database.
@@ -222,6 +231,7 @@ class ImplSkeleton:
         self.communication_operations_serial = serialize_obj(self.communicationOperations)
         self.loops_serial = serialize_obj(self.loops)
         self.kernels_serial = serialize_obj(self.kernels)
+        self.code_tree_serial = serialize_obj(self.code_tree)
         self.codegen_serial = serialize_obj(self.codegen)
         # IDs of connected templates.
         self.connected_templates_ids = ','.join(sorted([str(connect[0].db_id) for connect in self.connected_templates]))
@@ -345,7 +355,9 @@ class ImplSkeleton:
         #    name, skeleton, execs, kernel_templates)
         #    for name, execs in skeleton.kernels.items()]
         # Attribute isIVPdependent.
-        skeleton.isIVPdependent = True
+        skeleton.isIVPdependent = True  # TODO
+        # Attribute code_tree.
+        skeleton.code_tree = deserialize_obj(skeleton.code_tree_serial)
         # Attribute codegen.
         skeleton.codegen = deserialize_obj(skeleton.codegen_serial)
         return skeleton
@@ -374,9 +386,7 @@ class ImplVariant:
                      Column('db_id', Integer, primary_key=True),
                      Column('skeleton', Integer, ForeignKey('impl_skeleton.db_id')),
                      Column('kernels_serial', Integer),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      UniqueConstraint('skeleton', 'kernels_serial'),

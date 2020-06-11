@@ -2,97 +2,125 @@
 Definition of class YasksiteCodeGenerator.
 """
 
-from pathlib import Path
+from copy import deepcopy
+from typing import Dict
 
 import attr
-from pcre import sub
+from sortedcontainers import SortedDict
 
-from offsite.codegen.code_object import CodeStr, YasksiteCode
-from offsite.codegen.codegen_util import gen_loop_string, indent
-from offsite.codegen.template_generator import TemplateCodeGenerator
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
+from offsite.codegen.codegen_util import eval_loop_boundary, substitute_stencil_call
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.descriptions.parser_utils import DatastructType
 from offsite.evaluation.math_utils import corrector_steps, stages
 
 
-@attr.s(kw_only=True)
-class YasksiteCodeGenerator(TemplateCodeGenerator):
-    """Representation of the code generator for pmodel kernel code.
+@attr.s
+class YasksiteCodeGenerator:
+    """Representation of the code generator for yasksite kernel code.
 
     Attributes:
     -----------
-    -
+    unroll_stack : SortedDict
+        Stack of loops to be unrolled.
     """
+    unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
 
-    def __attrs_post_init__(self):
-        """Create this YasksiteCodeGenerator object.
+    def collect_loop_meta_data(self, node: CodeNode):
+        """Traverse tree depth first and collect all unroll tasks.
 
         Parameters:
         -----------
-        -
+        node: CodeNode
+            Root node of the code tree.
 
         Returns:
         --------
         -
         """
-        self.parser = {
-            '%LOOP_START': self.resolve_loop_start,
-            '%LOOP_END': self.resolve_loop_end,
-            '%PRAGMA': self.resolve_pragma,
-            '%COMP': self.resolve_comp,
-        }
+        if node.type == CodeNodeType.LOOP:
+            if node.optimize_unroll is not None:
+                self.unroll_stack[node.optimize_unroll] = node
+        # Traverse tree depth first.
+        if node.child:
+            self.collect_loop_meta_data(node.child)
+        if node.next:
+            self.collect_loop_meta_data(node.next)
 
-    def generate(self, kernel: 'Kernel', method: ODEMethod, ivp: IVP) -> YasksiteCode:
+    def unroll_tree(self, tree: CodeNode):
+        """Apply all applicable loop unroll optimizations to the passed code tree.
+
+        Parameters:
+        -----------
+        tree: CodeNode
+            Root node of the code tree.
+
+        Returns:
+        --------
+        -
+        """
+        while True:
+            self.unroll_stack.clear()
+            self.collect_loop_meta_data(tree)
+            if len(self.unroll_stack.keys()) == 0:
+                break
+            CodeTree.unroll_loop(self.unroll_stack.values()[0])
+
+    def generate(self, kernel: 'Kernel', method: 'ODEMethod', ivp: 'IVP') -> Dict[str, str]:
         """Generate yasksite code for a particular Kernel object.
 
         Parameters:
         -----------
-        kernel : Kernel
+        kernel: Kernel
             Kernel for which code is generated.
-        method : ODEMethod
+        method: ODEMethod
             ODE method for which code is generated.
-        ivp : IVP
+        ivp: IVP
             IVP possibly evaluated by the kernel for which code is generated.
 
         Returns:
         --------
-        YasksiteCode
-            Generated yasksite code.
+        dict of str
+            Generated yasksite codes.
         """
         # Set some members to match current code generation.
-        self.kernel = kernel
-        self.template = kernel.template
-        self.ivp = ivp
-        self.method = method
-        # Reset loop unroll stack.
+        code_tree = deepcopy(kernel.code_tree).root
+        code_tree.name = kernel.name
+
         self.unroll_stack.clear()
 
-        # var_defs = self.construct_variable_defs()
-        #
-        # Initialize yasksite code object.
-        code = YasksiteCode(kernel.name, ivp.name if ivp else '', '')
-        code.code_string.set(self.construct_variable_defs())
-        # Parse kernel object and create pmodel code.
-        self.parse_kernel(code)
-        # Insert RHS evaluations.
-        if code.contains('%RHS'):
-            assert self.ivp
-            assert self.ivp.characteristic.isStencil
-            self.replace_rhs_tags(code)
-        # Further optimize the generated code ...
-        # ... unroll loops.
-        code.code_string.unroll(self.unroll_stack, self.method)
-        # ... insert butcher table coefficients.
-        code.code_string.butcher(self.method)
-        return code
+        # Generate yasksite code tree.
+        self.generate_yasksite_tree(code_tree, kernel.template, method, ivp)
+        # Collect loop data.
+        self.collect_loop_meta_data(code_tree)
+        # Optimize tree: unroll
+        self.unroll_tree(code_tree)
+        # Substitute butcher table coefficients.
+        CodeTree.substitute_butcher_coefficients(code_tree, method)
+        # Generate code from tree and write to string.
+        codes = dict()
+        if kernel.template.isIVPdependent:
+            assert ivp.characteristic.isStencil
+            code_name = code_tree.name + '_{}'.format(ivp.name)
+            codes[code_name] = self.generate_yasksite_code(code_tree)
+        else:
+            codes[code_tree.name] = self.generate_yasksite_code(code_tree)
+        # Prepend variable definitions to written code.
+        var_defs = self.construct_variable_defs(kernel.template.datastructs, method)
+        codes = {name: var_defs + code for name, code in codes.items()}
+        return codes
 
-    def construct_variable_defs(self) -> str:
-        """Construct variable definitions of a particular kernel.
+    @staticmethod
+    def construct_variable_defs(datastructs: 'DatastructDict', method: 'ODEMethod') -> str:
+        """Construct variable definitions.
 
         Parameters:
         -----------
-        -
+        datastructs: DatastructDict
+            Used data structures.
+        method: ODEMethod
+            Used ODE method.
 
         Returns:
         --------
@@ -100,7 +128,7 @@ class YasksiteCodeGenerator(TemplateCodeGenerator):
             Variable definitions string.
         """
         var_defs = ''
-        for name, desc in self.template.datastructs.items():
+        for name, desc in datastructs.items():
             if desc.isYasksiteParam:
                 var_type = 'PARAM'
             elif desc.struct_type == DatastructType.scalar:
@@ -117,78 +145,76 @@ class YasksiteCodeGenerator(TemplateCodeGenerator):
             # Write variable definition.
             var_defs += '{} {}{};\n'.format(var_type, name, desc.dimensions_to_string_yasksite())
         # Replace ODE method constants.
-        corrector_steps_tup = corrector_steps(self.method)
+        corrector_steps_tup = corrector_steps(method)
         if '[{}]'.format(corrector_steps_tup[0]) in var_defs:
-            var_defs = sub(r'\[{}\]'.format(corrector_steps_tup[0]), '[{}]'.format(corrector_steps_tup[1]), var_defs)
-        stages_tup = stages(self.method)
+            var_defs = var_defs.replace('[{}]'.format(corrector_steps_tup[0]), '[{}]'.format(corrector_steps_tup[1]))
+        stages_tup = stages(method)
         if '[{}]'.format(stages_tup[0]) in var_defs:
-            var_defs = sub(r'\[{}\]'.format(stages_tup[0]), '[{}]'.format(stages_tup[1]), var_defs)
+            var_defs = var_defs.replace('[{}]'.format(stages_tup[0]), '[{}]'.format(stages_tup[1]))
         return var_defs + '\n'
 
-    def parse_kernel(self, yasksite_code: YasksiteCode):
-        """Parse Kernel object and create its corresponding yasksite code objects.
+    @staticmethod
+    def generate_yasksite_tree(node: CodeNode, template: 'KernelTemplate', method: 'ODEMethod', ivp: 'IVP'):
+        """Generate yasksite code tree.
 
         Parameters:
         -----------
-        yasksite_code : YasksiteCode
-            Container to store the created yasksite codes.
+        node: CodeNode
+            Root node of the code tree.
+        template: KernelTemplate
+            Used kernel template.
+        method: ODEMethod
+            Used ODE method.
+        ivp: IVP
+            Used IVP.
 
         Returns:
         --------
         -
         """
-        code = yasksite_code.code_string
-        # Parse kernel.
-        for line in self.kernel.code.split('\n'):
-            func_tuple = self.parse_line(line)
-            if func_tuple[0]:
-                func_tuple[0](code, *func_tuple[1])
+        if node.type == CodeNodeType.LOOP:
+            # Evaluate loop boundary expression.
+            node.boundary = eval_loop_boundary(method, node.boundary)
+        elif node.type == CodeNodeType.COMPUTATION:
+            # Substitute computation.
+            node.computation = template.computations[node.computation].computation
+            # Check if computation includes RHS calls.
+            if '%RHS' in node.computation:
+                assert 'RHS_input' in template.codegen
+                assert 'RHS_butcher_nodes' in template.codegen
+                node.computation = substitute_stencil_call(
+                    node.computation, ivp.constants.as_tuple(), template.codegen['RHS_input'],
+                    template.codegen['RHS_butcher_nodes'], ivp.code_stencil_path)
+        elif node.type == CodeNodeType.COMMUNICATION:
+            # TODO: Add support later
+            pass
+        # Traverse tree depth first.
+        if node.child:
+            YasksiteCodeGenerator.generate_yasksite_tree(node.child, template, method, ivp)
+        if node.next:
+            YasksiteCodeGenerator.generate_yasksite_tree(node.next, template, method, ivp)
 
-    def write_loop(self, loop_var: str, loop_iterations: str, code_str: CodeStr):
-        """Write for loop with increment 1.
+    @staticmethod
+    def generate_yasksite_code(node: CodeNode, code: str = '') -> str:
+        """Write yasksite code.
 
         Parameters:
         -----------
-        loop_var : str
-            Name of the loop variable.
-        loop_iterations : str
-            Number of iterations executed.
-        code_str : CodeStr
-            Container to store the created code.
+        node: CodeNode
+            Root node of the code tree.
+        code: str
+            Current code string.
 
         Returns:
         --------
         str
-            Code string passed with attached for loop code.
+            Generated yasksite code.
         """
-        code_str.add(indent(code_str.get_indent()))
-        code_str.add(gen_loop_string(self.method, loop_var, 0, loop_iterations))
-        code_str.inc_indent()
-
-    def replace_rhs_tags(self, code: YasksiteCode):
-        """Replace %RHS tags in code string with the given IVP component.
-
-        Parameters:
-        -----------
-        code : YasksiteCode
-            Container storing the yasksite code string with RHS tags.
-
-        Returns:
-        --------
-        """
-        rhs_code_str = ''
-        for line in code.code_string.get().split('\n'):
-            if '%RHS' in line:
-                input_vec = self.template.codegen['RHS_input']
-                # Write IVP constants to std::map.
-                constant_map = '{'
-                for name, desc in self.ivp.constants.items():
-                    constant_map += '{\"' + name + '\", ' + desc.value + '}'
-                constant_map += '}'
-                repl = 'RHS({}, {}, {}, {})'.format(
-                    input_vec, constant_map, Path(self.ivp.code_stencil_path).stem,
-                    self.template.codegen['RHS_butcher_nodes'])
-                # TODO FIX bug in constant_map creation --> single }
-                line = sub(r'%RHS', repl, line)
-            rhs_code_str += line + '\n'
-        code.code_string.set(rhs_code_str)
+        if node.type != CodeNodeType.ROOT and node.type != CodeNodeType.LOOP:
+            code += node.to_yasksite_codeline()
+        # Traverse tree depth first.
+        if node.child:
+            code += YasksiteCodeGenerator.generate_yasksite_code(node.child)
+        if node.next:
+            code += YasksiteCodeGenerator.generate_yasksite_code(node.next)
+        return code

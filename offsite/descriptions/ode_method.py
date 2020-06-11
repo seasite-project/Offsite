@@ -65,9 +65,7 @@ class ODEMethod:
                      Column('coefficientsA_serial', String),
                      Column('coefficientsB_serial', String),
                      Column('coefficientsC_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)

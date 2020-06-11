@@ -10,13 +10,16 @@ from sys import maxsize as sys_maxsize
 from typing import Dict, List, Tuple
 
 import attr
+from lark import Lark
 from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
-from offsite.codegen.pmodel_generator import PModelCodeGenerator
+from offsite.codegen.code_tree import CodeTree, CodeTreeGenerator
+from offsite.codegen.codegen_util import write_codes_to_file
+from offsite.codegen.kerncraft_generator import KerncraftCodeGenerator
 from offsite.codegen.yasksite_generator import YasksiteCodeGenerator
 from offsite.config import ModelToolType
 from offsite.db import METADATA
@@ -28,7 +31,6 @@ from offsite.descriptions.parser_utils import load_yaml, ComputationDict, Datast
 from offsite.evaluation.math_utils import eval_math_expr, solve_equation, cacheline_elements, corrector_steps, \
     ivp_grid_size, stages
 from offsite.evaluation.performance_model import SampleInterval, SamplePosition
-
 
 # Extension of kernel files."""
 __kernel_ext__ = '.c'
@@ -78,9 +80,7 @@ class KernelTemplate:
                      Column('datastructs_serial', String),
                      Column('computations_serial', String),
                      Column('codegen_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -252,8 +252,10 @@ class Kernel:
         Reference to associated KernelTemplate object.
     pmodel_kernels : list of PmodelKernel
         PmodelKernel objects associated with this object.
-    code : str
-        DSL representation of the kernel code.
+    code_tree : CodeTree
+        Tree representation of the kernel code.
+    codegen : dict
+        Code generation parameters used to generate code of this object.
     optimization_parameters : dict (key=str, value=str)
         Applied YaskSite optimization parameters.
     db_id : int
@@ -262,8 +264,11 @@ class Kernel:
     name = attr.ib(type=str)
     template = attr.ib(type=KernelTemplate, hash=False)
     pmodel_kernels = attr.ib(type='PModelKernel', hash=False)
-    code = attr.ib(type=str, hash=False)
+    code_tree = attr.ib(type=CodeTree, hash=False)
+    codegen = attr.ib(type=Dict, default=dict())
     optimization_parameters = attr.ib(type=Dict[str, str], default=dict(), hash=False)
+    code_tree_serial = attr.ib(type=str, init=False)
+    codegen_serial = attr.ib(type=str, init=False)
     optimization_parameters_serial = attr.ib(type=str, init=False, hash=False)
     template_db_id = attr.ib(type=int, init=False, hash=False)
     db_id = attr.ib(type=int, init=False)
@@ -273,11 +278,10 @@ class Kernel:
                      Column('db_id', Integer, primary_key=True),
                      Column('name', String),
                      Column('template_db_id', Integer, ForeignKey('kernel_template.db_id')),
-                     Column('code', String),
+                     Column('code_tree_serial', String),
+                     Column('codegen_serial', String),
                      Column('optimization_parameters_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      UniqueConstraint('name', 'template_db_id'),
@@ -301,13 +305,26 @@ class Kernel:
         """
         # Attribute name.
         name = yaml['name']
-        # Attribute code.
-        code = yaml['code']
+        # Attribute code_tree.
+        with open('offsite/codegen/code_dsl.lark') as f:
+            grammar = f.read()
+        parser = Lark(grammar, parser='lalr')
+        parsed_code = parser.parse(yaml['code'])
+        code_tree = CodeTreeGenerator().generate(parsed_code)
+        code_tree = deepcopy(code_tree)
         # Attribute pmodel_kernels.
         # .. used to temporarily store yaml data for post init.
         pmodel_kernels = yaml['pmodel']
+        # Attribute codegen.
+        codegen = dict()
+        if 'codegen' in yaml:
+            for key, value in yaml['codegen'].items():
+                if key == 'loop splits':
+                    codegen[key] = [v for v in value]
+                else:
+                    codegen[key] = value
         # Create object.
-        return cls(name, template, pmodel_kernels, code)
+        return cls(name, template, pmodel_kernels, code_tree, codegen)
 
     @classmethod
     def from_database(cls, db_session: Session, kernel_name: str, kernel_template_id: int) -> 'Kernel':
@@ -336,6 +353,10 @@ class Kernel:
             raise RuntimeError('Unable to load Kernel object from database!')
         # Attribute optimization_parameters.
         kernel.optimization_parameters = deserialize_obj(kernel.optimization_parameters_serial)
+        # Attribute code_tree.
+        kernel.code_tree = deserialize_obj(kernel.code_tree_serial)
+        # Attribute codegen.
+        kernel.codegen = deserialize_obj(kernel.codegen_serial)
         # Attribute template.
         kernel.template = db_session.query(KernelTemplate).filter(KernelTemplate.db_id.is_(kernel_template_id)).one()
         # Attribute pmodel_kernels.
@@ -383,6 +404,8 @@ class Kernel:
         if kernel:
             # Supplement attributes not saved in database.
             kernel.optimization_parameters = self.optimization_parameters
+            kernel.code_tree = self.code_tree
+            kernel.codegen = self.codegen
             kernel.template = self.template
             kernel.pmodel_kernels = list()
             for pmodel in self.pmodel_kernels:
@@ -393,6 +416,10 @@ class Kernel:
         insert(db_session, self)
         # Attribute optimization_parameters_serial.
         self.optimization_parameters_serial = serialize_obj(self.optimization_parameters)
+        # Attribute code_tree.
+        self.code_tree_serial = serialize_obj(self.code_tree)
+        # Attribute codegen.
+        self.codegen_serial = serialize_obj(self.codegen)
         # Attribute template_db_id.
         self.template_db_id = self.template.db_id
         # PModelKernel objects.
@@ -418,44 +445,39 @@ class Kernel:
         --------
         -
         """
-        config = offsite.config.offsiteConfig
         # Generate code for kerncraft tool.
         if self.template.modelTool == ModelToolType.KERNCRAFT:
             # Generate pmodel codes.
-            code = PModelCodeGenerator(config=config).generate(self, method, ivp)
-            # Write code to files.
-            code.write_to_file(Path('tmp'))
-            # Save code file paths in proper PModelKernel objects.
+            codes = KerncraftCodeGenerator().generate(self, method, ivp)
+            codes = write_codes_to_file(codes, 'tmp')
+            # Link code files to PModelKernel objects.
             for pmodel in self.pmodel_kernels:
+                pmodel_suffix = '_{}'.format(pmodel.name) if pmodel.name else ''
+                ivp_suffix = '_{}'.format(ivp.name) if (ivp and self.template.isIVPdependent) else ''
                 if self.template.isIVPdependent and len(ivp.components) > 1:
                     pmodel.code_path = dict()
-                    for rid, comp in enumerate(ivp.components):
-                        code_path = Path('tmp/{}_pmodel{}{}_{}.c'.format(
-                            self.name, '_{}'.format(pmodel.name) if pmodel.name else '',
-                            '_{}'.format(ivp.name), rid + 1))
-                        if code_path not in code.paths:
-                            raise RuntimeError('Unknown pmodel kernel: {}'.format(code_path))
-                        pmodel.code_path[comp] = code_path
+                    for idx, name in enumerate(ivp.components):
+                        pmodel.code_path[name] = Path(
+                            'tmp/{}{}{}_{}.c'.format(self.name, pmodel_suffix, ivp_suffix, idx + 1))
+                        if pmodel.code_path[name] not in codes:
+                            raise RuntimeError('Unknown pmodel kernel: {}'.format(pmodel.code_path))
                 else:
-                    pmodel.code_path = Path('tmp/{}_pmodel{}{}.c'.format(
-                        self.name, '_{}'.format(pmodel.name) if pmodel.name else '',
-                        '_{}'.format(ivp.name) if (ivp and self.template.isIVPdependent) else ''))
-                    if pmodel.code_path not in code.paths:
+                    pmodel.code_path = Path('tmp/{}{}{}.c'.format(self.name, pmodel_suffix, ivp_suffix))
+                    if pmodel.code_path not in codes:
                         raise RuntimeError('Unknown pmodel kernel: {}'.format(pmodel.code_path))
         # Generate code for yasksite tool.
         elif self.template.modelTool == ModelToolType.YASKSITE:
             if ivp and not ivp.characteristic.isStencil:
                 raise RuntimeError('Can not generate YASKSITE code for {}: Not a stencil!'.format(ivp.name))
-            # Generate yasksite code.
-            code = YasksiteCodeGenerator(config=config).generate(self, method, ivp)
-            # Write code to file.
-            code.write_to_file(Path('tmp'))
-            # Save code file path in proper PModelKernel object.
+            # Generate Yasksite code.
+            codes = YasksiteCodeGenerator().generate(self, method, ivp)
+            codes = write_codes_to_file(codes, 'tmp')
+            # Link code files to PModelKernel objects.
             for pmodel in self.pmodel_kernels:
-                pmodel.code_path = Path('tmp/{}_yasksite{}{}.c'.format(
-                    self.name, '_{}'.format(pmodel.name) if pmodel.name else '',
-                    '_{}'.format(ivp.name) if (ivp and self.template.isIVPdependent) else ''))
-                if pmodel.code_path != code.path:
+                pmodel_suffix = '_{}'.format(pmodel.name) if pmodel.name else ''
+                ivp_suffix = '_{}'.format(ivp.name) if (ivp and self.template.isIVPdependent) else ''
+                pmodel.code_path = Path('tmp/{}{}{}.c'.format(self.name, pmodel_suffix, ivp_suffix))
+                if pmodel.code_path not in codes:
                     raise RuntimeError('Unknown pmodel kernel: {}'.format(pmodel.code_path))
         else:
             assert False
@@ -506,12 +528,8 @@ class Kernel:
                 # Determine lowest end value of current samples.
                 low_s = None
                 for spk in samples_pmk:
-                    try:
-                        low_s = spk[0] if spk[0].last < end else low_s
-                        end = min(spk[0].last, end)
-                    except TypeError:
-                        low_s = spk[0]
-                        end = spk[0].last if end == 'inf' else end
+                    low_s = spk[0] if spk[0].last < end else low_s
+                    end = min(spk[0].last, end)
                 # Add sample with this end value to list.
                 med = low_s.median(ivp)
                 samples.append(SampleInterval(low_s.first, low_s.last, med))
@@ -601,9 +619,7 @@ class PModelKernel:
                      Column('kernel_db_id', Integer, ForeignKey('kernel.db_id')),
                      Column('iterations', String),
                      Column('working_sets_serial', String),
-                     Column('createdBy', String, default=getuser()),
-                     Column('createdIn', String, default=__version__),
-                     Column('createdOn', DateTime, default=datetime.now),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      UniqueConstraint('name', 'kernel_db_id'),
@@ -788,7 +804,7 @@ class PModelKernel:
         # Add sample for memory size.
         point = SampleInterval(start, 2 * wset_end * mem_level_factor).median(ivp)
         if point:
-            samples.append(SampleInterval(start, 'inf', point))
+            samples.append(SampleInterval(start, sys_maxsize, point))
         else:
             raise ValueError('Failed to create sample interval in main memory range for PModelKernel {}{}!'.format(
                 self.kernel.name, self.name))
