@@ -2,6 +2,10 @@ model_tool: kerncraft
 ODE grid dim: n
 characteristics:
   - sparse
+  - stencil
+  - stencil_dim: 1
+  - stencil_radius: 4
+  - access_distance: 4
 constants:
   - double wave_k = 0.5
   - double wave_c = 3.0
@@ -119,3 +123,10 @@ codegen:
       double x = xmin + ((double) i * ((xmax - xmin) / ((double) g - 1.0)));
       %in[i] = wave_k * exp(-(x * x) / (wave_c * wave_c));
     }
+  required_indices: |
+    std::set<int> set;
+    for(int i = imax(first - 4, 0); i <= imin(last + 4, n-1); i++)
+    {
+      set.insert(i);
+    }
+    return set;

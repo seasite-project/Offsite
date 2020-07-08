@@ -29,11 +29,9 @@ variants:
       %LOOP_END j
     pmodel :
       - name : 1
-        iterations : "s*n"
         working sets: { "2*s*n+s*s", "(s+1)*n+s*c" }
       - name : 2
-        iterations : "n"
-        working sets: { "(s+1)*n" } 
+        working sets: { "(s+1)*n" }
   - name : LC_ilj
     code: |
       %PRAGMA nounroll_and_jam
@@ -55,10 +53,8 @@ variants:
       %LOOP_END l
     pmodel :
       - name : 1
-        iterations : "s*s*n"
         working sets: { "2*s*n+s*s", "(s+1)*n+s*c", "2*n" }
       - name : 2
-        iterations : "s*n"
         working sets: { "(s+1)*n", "2*n" }
   - name : LC_jil
     code: |
@@ -74,8 +70,7 @@ variants:
       %LOOP_END l
       %LOOP_END j
     pmodel :
-      - iterations : "n"
-        working sets: { "(2*s+1)*n+s*s" }
+      - working sets: { "(2*s+1)*n+s*s" }
   - name : LC_jli
     code: |
       %PRAGMA ivdep
@@ -88,8 +83,7 @@ variants:
       %LOOP_END l
       %LOOP_END j
     pmodel :
-      - iterations : "n"
-        working sets: { "(2*s+1)*n+s*s" }
+      - working sets: { "(2*s+1)*n+s*s" }
   - name : LC_lij
     code: |
       %PRAGMA nounroll_and_jam
@@ -109,10 +103,8 @@ variants:
       %LOOP_END l
     pmodel :
       - name : 1
-        iterations : "s*s*n"
         working sets: { "(2*s+1)*n+s*s", "(s+1)*n+s", "2*n" }
       - name : 2
-        iterations : "s*n"
         working sets: { "(s+1)*n", "2*n" }
   - name : LC_lji
     code: |
@@ -127,8 +119,7 @@ variants:
       %LOOP_END j
       %LOOP_END l
     pmodel :
-      - iterations : "s*n"
-        working sets: { "(2*s+1)*n+s*s", "(s+2)*n+s" }
+      - working sets: { "(2*s+1)*n+s*s", "(s+2)*n+s" }
 codegen:
   loop splits:
     - i 0

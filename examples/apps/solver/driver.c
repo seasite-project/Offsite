@@ -16,7 +16,7 @@
 
 double H;
 
-static inline double min(double a, double b)
+static inline double dmin(double a, double b)
 {
   if (a < b)
     return a;
@@ -24,7 +24,7 @@ static inline double min(double a, double b)
     return b;
 }
 
-static inline double max(double a, double b)
+static inline double dmax(double a, double b)
 {
   if (a < b)
     return b;
@@ -138,10 +138,6 @@ int main()
 
   print_pitch_line();
 
-#ifdef DUMP
-  dump_result("iv.dat", 0, 0, t0, y);
-#endif
-
   init_time_snap();
 
   time_snap_start(&ts);
@@ -168,8 +164,8 @@ int main()
       {
         steps++;
       
-        hmin = min(hmin, h);
-        hmax = max(hmax, h);
+        hmin = dmin(hmin, h);
+        hmax = dmax(hmax, h);
         hsum += h;
       }
 
@@ -186,7 +182,7 @@ int main()
 
 #endif
 
-      h = min(h, te - t);
+      h = dmin(h, te - t);
         
 #pragma omp master
       show_progress(t, h);
@@ -200,10 +196,6 @@ int main()
   T = time_snap_stop(&ts) / 1e9;
   tps = T / (double) steps;
   tpcs = tps / (double) n;
-
-#ifdef DUMP
-  dump_result("solution.dat", 0, 0, te, y);
-#endif
 
   show_completion();
 

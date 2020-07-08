@@ -18,8 +18,7 @@ variants:
       %LOOP_END j
       %LOOP_END i
     pmodel :
-      - iterations : "s*n"
-        working sets: { "(s+1)*n+s", "2*n" }
+      - working sets: { "(s+1)*n+s", "2*n" }
   - name : RHS_Approx_ji
     code: |
       %PRAGMA ivdep
@@ -29,8 +28,7 @@ variants:
       %LOOP_END i
       %LOOP_END j
     pmodel :
-      - iterations : "n"
-        working sets: { "(s+1)*n+s" }
+      - working sets: { "(s+1)*n+s" }
 codegen:
   loop splits:
     - i 0

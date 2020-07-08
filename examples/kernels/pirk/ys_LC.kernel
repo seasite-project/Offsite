@@ -19,8 +19,7 @@ variants:
         %COMP B
       %LOOP_END l
     pmodel :
-      - iterations : "n"
-        working sets: { "(2*s+1)*n+s*s" }
+      - working sets: { "(2*s+1)*n+s*s" }
   - name : ys_LC_jli
     code: |
       %LOOP_START l s unroll 1 
@@ -30,6 +29,5 @@ variants:
         %COMP B
       %LOOP_END l
     pmodel :
-      - iterations : "n"
-        working sets: { "(2*s+1)*n+s*s" }
+      - working sets: { "(2*s+1)*n+s*s" }
 model_tool: yasksite

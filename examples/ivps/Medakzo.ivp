@@ -2,6 +2,7 @@ model_tool: kerncraft
 ODE grid dim: n/2
 characteristics:
   - sparse
+  - access_distance: g
 constants:
   - double medakzo_v = 1.0
   - double medakzo_k = 100.0
@@ -19,7 +20,7 @@ components:
     first: g
     size: g
     code: |
-      -medakzo_k * %in[j]
+      -medakzo_k * %in[j] * %in[j - g]
 codegen:
   eval_range: |
     int j = first;
@@ -110,7 +111,7 @@ codegen:
         f[j] = -medakzo_k * %in[g - 1] * %in[n - 1];
       }
     }
-    else if (first >=g) // 2.PDE
+    else if (first >= g) // 2.PDE
     {
       if (first == g)
       {
@@ -168,4 +169,14 @@ codegen:
       %in[i - 1] = 0.0;
       %in[g + i - 1] = medakzo_v;
     }
-
+  required_indices: |
+    std::set<int> set;
+    for(int i = imax(first - 1, 0); i <= imin(last + 1, n-1); i++)
+    {
+      set.insert(i);
+    }
+    for(int i = first + g; i <= imin(last + g, n-1); i++)
+    {
+      set.insert(i);
+    }
+    return set;

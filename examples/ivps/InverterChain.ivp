@@ -1,7 +1,11 @@
 model_tool: kerncraft
 ODE grid dim: n
 characteristics:
-- sparse
+  - sparse
+  - stencil
+  - stencil_dim: 1
+  - stencil_radius: 1
+  - access_distance: 1
 constants:
 - double U_op = 5.0
 - double U_op_scaling = 1.0
@@ -24,8 +28,8 @@ codegen:
       double U_previous = ((j == 0) ? U_op_scaling * U_op * sin(2 * M_PI * t * freq - M_PI / 2) * 0.5 + (U_op_scaling * U_op * 0.5) : %in[j - 1]);
       double U_j = %in[j];
     
-      double max1 = max(U_previous - U_thres, 0.0);
-      double max2 = max(U_previous - U_j - U_thres, 0.0);
+      double max1 = dmax(U_previous - U_thres, 0.0);
+      double max2 = dmax(U_previous - U_j - U_thres, 0.0);
       double ids = eta * (max1 * max1 - max2 * max2);
   
       f[j] = ((U_op - U_j) / R - ids) / C;
@@ -34,11 +38,18 @@ codegen:
     double U_previous = ((j == 0) ? U_op_scaling * U_op * sin(2 * M_PI * t * freq - M_PI / 2) * 0.5 + (U_op_scaling * U_op * 0.5) : %in[j - 1]);
     double U_j = %in[j];
     
-    double max1 = max(U_previous - U_thres, 0.0);
-    double max2 = max(U_previous - U_j - U_thres, 0.0);
+    double max1 = dmax(U_previous - U_thres, 0.0);
+    double max2 = dmax(U_previous - U_j - U_thres, 0.0);
     double ids = eta * (max1 * max1 - max2 * max2);
   
     return ((U_op - U_j) / R - ids) / C;
   initial_values: |
     for (int j = 0; j < n; j++)
       %in[j] = ((j + 1) % 2) * U_op_scaling * U_op;
+  required_indices: |
+    std::set<int> set;
+    for(int i = imax(first - 1, 0); i <= last; i++)
+    {
+      set.insert(i);
+    }
+    return set;

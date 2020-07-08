@@ -19,8 +19,7 @@ variants:
       %LOOP_END j
       %LOOP_END l
     pmodel :
-      - iterations: s * n
-        working sets: { "2*s*n+s", "(s+1)*n+s", "2*n" }
+      - working sets: { "2*s*n+s", "(s+1)*n+s", "2*n" }
     codegen :
         RHS: "eval_range"
   - name: RHS_jl
@@ -32,12 +31,10 @@ variants:
       %LOOP_END l
       %LOOP_END j
     pmodel :
-      - iterations: s * n
-        working sets: { "2*s*n+s", "(s+1)*n+s" }
+      - working sets: { "2*s*n+s", "(s+1)*n+s" }
     codegen :
         RHS: "eval_component"
 codegen:
-  RHS: "eval_range"
   RHS_input: "Y[l]"
   RHS_butcher_nodes: "c[l]"
 model_tool: kerncraft

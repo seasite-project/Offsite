@@ -12,8 +12,7 @@ variants:
         %COMP A
       %LOOP_END i
     pmodel :
-      - iterations: "n"
-        working sets: { "2*s*n+s" }
+      - working sets: { "2*s*n+s" }
 codegen:
   RHS_input: "y_old"
   RHS_butcher_nodes: "c[i]"

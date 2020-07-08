@@ -2,6 +2,7 @@ model_tool: kerncraft
 ODE grid dim: n/3
 characteristics:
   - sparse
+  - access_distance: 2*g
 constants:
   - double cusp_diffus = 1.0
 components:
@@ -228,3 +229,26 @@ codegen:
       %in[g + i - 1] = -2.0 * cos(i * del);
       %in[g + g + 1 -1] = 2.0 * sin(i * del);
     }
+  required_indices: |
+    std::set<int> set;
+    for(int i = imax(first - 1, 0); i <= imin(last + 1, n-1); i++)
+    {
+      set.insert(i);
+    }
+    for(int i = first + g; i <= imin(last + g, n-1); i++)
+    {
+      set.insert(i);
+    }
+    for(int i = first + 2*g; i <= imin(last + 2*g, n-1); i++)
+    {
+      set.insert(i);
+    }
+    for(int i = imax(first - g, 0); i <= imin(last - g, n-1); i++)
+    {
+      set.insert(i);
+    }
+    for(int i = imax(first - 2*g, 0); i <= imin(last - 2*g, n-1); i++)
+    {
+      set.insert(i);
+    }
+    return set;

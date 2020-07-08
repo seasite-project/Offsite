@@ -213,7 +213,7 @@ sub run($$$$)
 
     print "  - Compiling ...\n";
     my $cmd =
-"$cc $cflags -DVARIANT_HEADER=\\\"$variant_folder/$i.h\\\" -I. -DN=$N -Dn=$n -Dt0=0 -Dte=$te -Dh0=$h -DTHREADS=$t -DVARIANT_NAME=\\\"$i\\\" -o ./bench driver.c $ldlibs";
+"$cc $cflags -DVARIANT_HEADER=\\\"$variant_folder/$i.h\\\" -I. -Dg=$N -Dn=$n -Dt0=0 -Dte=$te -Dh0=$h -DTHREADS=$t -DVARIANT_NAME=\\\"$i\\\" -o ./bench driver.c $ldlibs";
 
     system($cmd);
     print "  - Running benchmark ... \n";

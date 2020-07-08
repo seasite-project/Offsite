@@ -35,8 +35,7 @@ variants:
       %LOOP_END l
       %LOOP_END j
     pmodel :
-      - iterations : "n"
-        working sets: { "s*n+n+s*s", "2*s*n+n+s*s" }
+      - working sets: { "s*n+n+s*s", "2*s*n+n+s*s" }
     codegen :
         RHS: "eval_component"
   - name : RHS_LC_jli
@@ -54,8 +53,7 @@ variants:
       %LOOP_END l
       %LOOP_END j
     pmodel :
-      - iterations : "n"
-        working sets: { "s*n+n+s*s+s", "2*s*n+n+s*s+s" }
+      - working sets: { "s*n+n+s*s+s", "2*s*n+n+s*s+s" }
   - name : RHS_LC_ijl
     code: |
       %PRAGMA nounroll_and_jam
@@ -77,10 +75,8 @@ variants:
       %LOOP_END j
     pmodel :
       - name : 1
-        iterations : "s*n"
         working sets: { "2*s*n+s*s", "s*n+n+s*s", "s*n+n+s" }
       - name : 2
-        iterations : "n"
         working sets: { "s*n+n" }
   - name : RHS_LC_ilj
     code: |
@@ -108,13 +104,10 @@ variants:
       %LOOP_END l
     pmodel :
       - name : 1
-        iterations : "s*n"
         working sets: { "s*n+n", "2*n" }
       - name : 2
-        iterations : "s*s*n"
         working sets: { "s*n+n+s*s", "s*n+n+s", "2*n" }
       - name : 3
-        iterations : "s*n"
         working sets: { "s*n+n", "2*n" }
     codegen :
         RHS: "eval_range"

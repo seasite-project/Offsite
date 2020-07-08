@@ -1,0 +1,21 @@
+code: |
+  %COM omp_barrier
+  %COM mpi_allgather y
+  %COM omp_barrier
+  %KERNEL RHS y
+  %COM omp_barrier
+  %KERNEL LC
+  %COM omp_barrier
+  %LOOP_START k m-1
+    %KERNEL RHS
+    %COM omp_barrier
+    %KERNEL LC
+    %COM omp_barrier
+    %LOOP_START i s
+      %COM mpi_allgather Y[i]
+    %LOOP_END i
+    %COM omp_barrier
+  %LOOP_END k
+  %KERNEL RHS_Approx_Update
+codegen:
+  datastructs: "Ysn_Fsn.h"

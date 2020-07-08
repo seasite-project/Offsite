@@ -9,6 +9,5 @@ variants:
     code: |
       %COMP A
     pmodel :
-      - iterations: n
-        working sets: { "2*n" }
+      - working sets: { "2*n" }
 model_tool: yasksite

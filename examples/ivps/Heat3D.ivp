@@ -5,6 +5,7 @@ characteristics:
   - stencil
   - stencil_dim: 3
   - stencil_radius: 1
+  - access_distance: g * g
 constants:
   - double g2 = g * g
 components:

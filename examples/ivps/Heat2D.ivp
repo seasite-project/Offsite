@@ -5,6 +5,7 @@ characteristics:
   - stencil
   - stencil_dim: 2
   - stencil_radius: 1
+  - access_distance: g
 constants:
   - double alpha = 0.23
 components:
@@ -185,3 +186,25 @@ codegen:
     for (int i = 0; i < g; i++)
       for (int j = 0; j < g; j++)
         %in[i * g + j] = 0.5 + (double)j / (double)(g - 1);
+  required_indices: |
+    std::set<int> set;
+    for(int i = first - 1; i <= last + 1; i++)
+    {
+      set.insert(i);
+    }
+    for(int i = first - g; i <= last - g; i++)
+    {
+      set.insert(i);
+    }
+    for(int i = first + g; i <= last + g; i++)
+    {
+      set.insert(i);
+    }
+    for(auto i: set)
+    {
+      if(i < 0 || i >= n)
+      {
+        set.erase(i);
+      }
+    }
+    return set;

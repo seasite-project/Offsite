@@ -1,7 +1,7 @@
 #pragma once
 
 #define PROBLEM_NAME "InverterChain"
-#define PROBLEM_ID 1
+#define PROBLEM_ID 3
 
 static inline void
 eval_range (int first, int last, double t, const double *y, double *f)
@@ -17,8 +17,8 @@ eval_range (int first, int last, double t, const double *y, double *f)
 	 (1.00000000000000 * 5.00000000000000 * 0.5) : y[j - 1]);
       double U_j = y[j];
 
-      double max1 = max (U_previous - 1.00000000000000, 0.0);
-      double max2 = max (U_previous - U_j - 1.00000000000000, 0.0);
+      double max1 = dmax (U_previous - 1.00000000000000, 0.0);
+      double max2 = dmax (U_previous - U_j - 1.00000000000000, 0.0);
       double ids = 0.000200000000000000 * (max1 * max1 - max2 * max2);
 
       f[j] =
@@ -38,8 +38,8 @@ eval_component (int j, double t, const double *y)
      (1.00000000000000 * 5.00000000000000 * 0.5) : y[j - 1]);
   double U_j = y[j];
 
-  double max1 = max (U_previous - 1.00000000000000, 0.0);
-  double max2 = max (U_previous - U_j - 1.00000000000000, 0.0);
+  double max1 = dmax (U_previous - 1.00000000000000, 0.0);
+  double max2 = dmax (U_previous - U_j - 1.00000000000000, 0.0);
   double ids = 0.000200000000000000 * (max1 * max1 - max2 * max2);
 
   return ((5.00000000000000 - U_j) / 5000.00000000000 -

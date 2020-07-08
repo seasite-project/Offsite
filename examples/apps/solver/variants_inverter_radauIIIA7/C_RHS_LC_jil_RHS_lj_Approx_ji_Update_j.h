@@ -16,6 +16,7 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
+      printf ("\n#ImplVariant-42\n");
     }
 #endif
 #pragma omp barrier
@@ -75,9 +76,13 @@ timestep (const int me, const int first, const int last, double t, double h)
   for (int k = 0; k < 5; ++k)
     {
 
-      double **tmp = Yprev;
-      Yprev = Ycur;
-      Ycur = tmp;
+      \
+#pragma omp master
+      {
+	double **tmp = Yprev;
+	Yprev = Ycur;
+	Ycur = tmp;
+      }
 
 //RHS_LC %16
 #ifdef INSTRUMENT
@@ -134,9 +139,13 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma omp barrier
     }
 
-  double **tmp = Yprev;
-  Yprev = Ycur;
-  Ycur = tmp;
+  \
+#pragma omp master
+  {
+    double **tmp = Yprev;
+    Yprev = Ycur;
+    Ycur = tmp;
+  }
 
 //RHS %20
 #ifdef INSTRUMENT

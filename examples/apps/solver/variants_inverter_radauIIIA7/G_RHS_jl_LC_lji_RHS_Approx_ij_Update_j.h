@@ -16,6 +16,7 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
+      printf ("\n#ImplVariant-103\n");
     }
 #endif
 #pragma omp barrier

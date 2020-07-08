@@ -16,6 +16,5 @@ variants:
       %LOOP_END i
       %COMP B
     pmodel :
-      - iterations: "n"
-        working sets: { "(s+1)*n+s" }
+      - working sets: { "(s+1)*n+s" }
 model_tool: yasksite
