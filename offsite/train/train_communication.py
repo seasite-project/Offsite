@@ -40,12 +40,19 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
     required_benchmarks = set()
     for skeleton in skeletons:
         for operation in skeleton.communicationOperations:
-            if operation not in AVAIL_BENCHMARKS:
+            if operation == 'mpi_allgather':
+                continue
+                # TODO add for full mpi support
+            elif operation == 'mpi_transfer':
+                continue
+                # TODO add for full mpi support
+            elif operation not in AVAIL_BENCHMARKS:
                 raise RuntimeError('Missing benchmark for {}!'.format(operation))
             required_benchmarks.add(AVAIL_BENCHMARKS[operation])
     if not required_benchmarks:
         return
     # Parse benchmark data files.
+    # TODO support multiple benchmark data files
     bench_data = {}
     if config.args.bench:
         data = load_yaml(config.args.bench)
@@ -70,7 +77,7 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
                 'Passed benchmark data \'{}\' were raised for a different set of compiler flags \'{}\'! Data for '
                 'compiler flags \'{}\' required!'.format(config.args.bench, flags, machine.compiler.flags))
         # Check CPU frequency.
-        if data['frequency'] != frequency:
+        if data['frequency'] != machine.clock:
             raise RuntimeError(
                 'Passed benchmark data \'{}\' were raised for different CPU frequency \'{} Hz\'! Data for frequency '
                 '\'{} Hz\'! required!'.format(config.args.bench, data['frequency'], machine.clock))

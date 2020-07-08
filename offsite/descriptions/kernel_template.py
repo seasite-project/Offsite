@@ -17,7 +17,8 @@ from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
-from offsite.codegen.code_tree import CodeTree, CodeTreeGenerator
+from offsite.codegen.code_dsl import code_grammar
+from offsite.codegen.code_tree import CodeNode, CodeNodeType, CodeTree, CodeTreeGenerator
 from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.kerncraft_generator import KerncraftCodeGenerator
 from offsite.codegen.yasksite_generator import YasksiteCodeGenerator
@@ -221,10 +222,13 @@ class KernelTemplate:
             template.datastructs = self.datastructs
             template.computations = self.computations
             template.codegen = self.codegen
-            template.variants = list()
             for variant in self.variants:
                 variant.template_db_id = template.db_id
-                template.variants.append(variant.to_database(db_session))
+            template.variants = [variant.to_database(db_session) for variant in self.variants]
+            # Update serialized members.
+            template.datastructs_serial = serialize_obj(template.datastructs)
+            template.computations_serial = serialize_obj(template.computations)
+            template.codegen_serial = serialize_obj(template.codegen)
             return template
         # Add new object to database.
         # Serialize data.
@@ -306,9 +310,7 @@ class Kernel:
         # Attribute name.
         name = yaml['name']
         # Attribute code_tree.
-        with open('offsite/codegen/code_dsl.lark') as f:
-            grammar = f.read()
-        parser = Lark(grammar, parser='lalr')
+        parser = Lark(code_grammar, parser='lalr')
         parsed_code = parser.parse(yaml['code'])
         code_tree = CodeTreeGenerator().generate(parsed_code)
         code_tree = deepcopy(code_tree)
@@ -381,9 +383,16 @@ class Kernel:
         yaml = self.pmodel_kernels
         # No need for name affix if there is only one PModelKernel.
         if len(yaml) == 1:
-            self.pmodel_kernels = [PModelKernel.from_yaml(yaml[0], self)]
+            self.pmodel_kernels = [PModelKernel.from_yaml(yaml[0], self, self.code_tree.root)]
         else:
-            self.pmodel_kernels = [PModelKernel.from_yaml(pm_yaml, self, pm_yaml['name']) for pm_yaml in yaml]
+            self.pmodel_kernels = list()
+            for idx, pm_yaml in enumerate(yaml):
+                if idx == 0:
+                    node = self.code_tree.root
+                else:
+                    node = CodeTree.find_pmodel_node(self.code_tree.root, idx)[0]
+                assert node is not None
+                self.pmodel_kernels.append(PModelKernel.from_yaml(pm_yaml, self, node, pm_yaml['name']))
 
     def to_database(self, db_session: Session):
         """Push this kernel object to the database.
@@ -407,10 +416,13 @@ class Kernel:
             kernel.code_tree = self.code_tree
             kernel.codegen = self.codegen
             kernel.template = self.template
-            kernel.pmodel_kernels = list()
             for pmodel in self.pmodel_kernels:
                 pmodel.kernel_db_id = kernel.db_id
-                kernel.pmodel_kernels.append(pmodel.to_database(db_session))
+            kernel.pmodel_kernels = [pmodel.to_database(db_session) for pmodel in self.pmodel_kernels]
+            # Update serialized members.
+            kernel.optimization_parameters_serial = serialize_obj(kernel.optimization_parameters)
+            kernel.code_tree_serial = serialize_obj(kernel.code_tree)
+            kernel.codegen_serial = serialize_obj(kernel.codegen)
             return kernel
         # Add new object to database.
         insert(db_session, self)
@@ -428,7 +440,7 @@ class Kernel:
             pmodel.to_database(db_session)
         return self
 
-    def generate_pmodel_code(self, method: ODEMethod, ivp: IVP):
+    def generate_pmodel_code(self, method: ODEMethod, ivp: IVP, system_size: int = None):
         """Generate code for all pmodel kernels associated with this object.
 
         For each PModelKernel, either a generalized version of the code or if required a specialised version (unrolled
@@ -436,10 +448,12 @@ class Kernel:
 
         Parameters:
         -----------
-        method : ODEMethod
+        method: ODEMethod
             Used ODE method.
-        ivp : IVP
+        ivp: IVP
             Used IVP.
+        system_size: int
+            Used ODE system size.
 
         Returns:
         --------
@@ -448,7 +462,7 @@ class Kernel:
         # Generate code for kerncraft tool.
         if self.template.modelTool == ModelToolType.KERNCRAFT:
             # Generate pmodel codes.
-            codes = KerncraftCodeGenerator().generate(self, method, ivp)
+            codes = KerncraftCodeGenerator().generate(self, method, ivp, system_size)
             codes = write_codes_to_file(codes, 'tmp')
             # Link code files to PModelKernel objects.
             for pmodel in self.pmodel_kernels:
@@ -502,12 +516,9 @@ class Kernel:
         list of SampleInterval
             List of significant sample intervals.
         """
-        config = offsite.config.offsiteConfig
         # For each PModelKernel, determine the sample intervals required to give prediction for each of the
         # PModelKernel's working sets. These intervals are sorted by their start value in ascending order.
-        samples_pmk = [pmk.determine_samples_from_working_sets(
-            machine, method, ivp, config.available_cache_size, config.samples_per_border,
-            config.step_between_border_samples, config.memory_lvl_sample_offset) for pmk in self.pmodel_kernels]
+        samples_pmk = [pmk.determine_samples_from_working_sets(machine, method, ivp) for pmk in self.pmodel_kernels]
         if not samples_pmk:
             raise RuntimeError('ERROR: Kernel \'{}\' has no PModelKernel!'.format(self.name))
         # Deduce the set of sample intervals required to give prediction for this kernel object from the sample
@@ -532,6 +543,8 @@ class Kernel:
                     end = min(spk[0].last, end)
                 # Add sample with this end value to list.
                 med = low_s.median(ivp)
+                if med is None:
+                    med = low_s.first
                 samples.append(SampleInterval(low_s.first, low_s.last, med))
                 # Update end of all current samples.
                 for spk in samples_pmk:
@@ -626,7 +639,7 @@ class PModelKernel:
                      sqlite_autoincrement=True)
 
     @classmethod
-    def from_yaml(cls, yaml: dict, kernel: Kernel, name: str = '') -> 'PModelKernel':
+    def from_yaml(cls, yaml: dict, kernel: Kernel, pmodel_node: CodeNode, name: str = '') -> 'PModelKernel':
         """Construct PModelKernel object from YAML definition.
 
         Parameters:
@@ -635,6 +648,8 @@ class PModelKernel:
             YAML object describing this object.
         kernel : Kernel
             Reference to associated Kernel object.
+        pmodel_node: CodeNode
+            Reference to associated CodeNode object.
         name : str
             Name of this object.
 
@@ -644,7 +659,29 @@ class PModelKernel:
             Created PModelObject object.
         """
         # Attribute iterations.
-        iterations = yaml['iterations']
+        # Compute iteration count.
+        if kernel.template.modelTool == ModelToolType.KERNCRAFT:
+            if pmodel_node.type == CodeNodeType.PMODEL:
+                iterations = CodeTree.iteration_count(pmodel_node.next)
+                #
+                prev = pmodel_node.prev
+                assert prev
+                while True:
+                    if prev.prev is None:
+                        break
+                    prev = prev.prev
+                if pmodel_node.prev.parent is not None:
+                    iterations = CodeTree.iteration_count_up_to_root(pmodel_node.prev.parent, iterations)
+            else:
+                iterations = CodeTree.iteration_count(pmodel_node)
+        elif kernel.template.modelTool == ModelToolType.YASKSITE:
+            iterations = CodeTree.iteration_count(pmodel_node)
+            # Yasksite code contains an implicit outer loop over the ODE system size 'n'.
+            iterations = '{} * n'.format(iterations) if iterations != '' else 'n'
+        else:
+            assert False
+        #
+        iterations = eval_math_expr(iterations, cast_to=str)
         # Attribute working_sets.
         working_sets = [ws for ws in yaml['working sets']]
         # Create object.
@@ -732,8 +769,7 @@ class PModelKernel:
         return eval_math_expr(self.iterations, constants)
 
     def determine_samples_from_working_sets(
-            self, machine: Machine, method: ODEMethod, ivp: IVP, avail_cache: float, num_border_samples: int,
-            step_border: float, mem_level_factor: float) -> List[SampleInterval]:
+            self, machine: Machine, method: ODEMethod, ivp: IVP) -> List[SampleInterval]:
         """
         Determine a list of significant IVP system size sample intervals and points for this object. These samples are
         then used to obtain performance predictions for this object. The shape of the list depends on the objects
@@ -748,21 +784,14 @@ class PModelKernel:
             Trained ODE method.
         ivp: IVP
             Trained IVP.
-        avail_cache : float
-            Fraction of the total cache size at most used for working set data.
-        num_border_samples : int
-            Number of sample intervals created in each border region.
-        step_border : float
-            Step between created sample intervals.
-        mem_level_factor : float
-            c
 
         Returns:
         --------
         list of SampleInterval
             List of sample intervals.
         """
-        assert mem_level_factor >= 1.0
+        config = offsite.config.offsiteConfig
+        assert config.memory_lvl_sample_offset >= 1.0
         # Raise error if no working sets were defined.
         if not self.workingSets:
             raise RuntimeError('No working sets defined for PModelKernel {}{}!'.format(self.kernel.name, self.name))
@@ -771,17 +800,17 @@ class PModelKernel:
         wset_start = 1
         wset_end = 1
         # Add samples for each working set.
-        for wset_end in self.determine_max_ns_of_working_sets(machine, method, avail_cache):
+        for wset_end in self.determine_max_ns_of_working_sets(machine, method):
             # Add samples in border region to previous working set.
             samples_border, start = create_samples_lower_border_working_set(
-                wset_start, wset_end, num_border_samples, step_border, ivp)
+                wset_start, wset_end, config.samples_per_border, config.step_between_border_samples, ivp)
             samples.extend(samples_border)
             # Switch to next working set once the end of the current set was reached.
             if start > wset_end:
                 break
             # Add samples in border region to next working set.
             samples_border, end = create_samples_upper_border_working_set(
-                start, wset_end, num_border_samples, step_border, ivp)
+                start, wset_end, config.samples_per_border, config.step_between_border_samples, ivp)
             samples.extend(samples_border)
             # Switch to next working set once the end of the last interval from the lower border region was reached.
             if end + 1 < start:
@@ -799,10 +828,10 @@ class PModelKernel:
                 wset_start = start
         # Add samples in border region of data from memory and largest cache working set size.
         samples_border, start = create_samples_lower_border_working_set(
-            wset_end + 1, sys_maxsize, num_border_samples, step_border, ivp)
+            wset_end + 1, sys_maxsize, config.samples_per_border, config.step_between_border_samples, ivp)
         samples.extend(samples_border)
         # Add sample for memory size.
-        point = SampleInterval(start, 2 * wset_end * mem_level_factor).median(ivp)
+        point = SampleInterval(start, 2 * wset_end * config.memory_lvl_sample_offset).median(ivp)
         if point:
             samples.append(SampleInterval(start, sys_maxsize, point))
         else:
@@ -812,13 +841,13 @@ class PModelKernel:
         #
         if self.kernel.template.modelTool == ModelToolType.YASKSITE and ivp.characteristic.isStencil:
             # Define cut-off sample size and sample multiplier.
-            cut_off_N = 50
-            cut_off_n = eval_math_expr(ivp.ivp_size(), [ivp_grid_size(cut_off_N)], cast_to=int)
-            multiplier = 1.1 ** ivp.characteristic.stencil_dim
+            cut_off_n = 50  # TODO: add as parameter to config?!
+            cut_off_n = eval_math_expr(ivp.ivp_size(), [ivp_grid_size(cut_off_n)], cast_to=int)
+            multiplier = 1.1 ** ivp.characteristic.stencil_dim  # TODO: add as parameter to config?!
             # Compute layer of the stencil.
             stencil_layer = 2 * ivp.characteristic.stencil_radius + 2
             #
-            end_size = int(2 * mem_level_factor * ((machine.l3CacheElements / stencil_layer) ** (
+            end_size = int(2 * config.memory_lvl_sample_offset * ((machine.l3CacheElements / stencil_layer) ** (
                     ivp.characteristic.stencil_dim / (ivp.characteristic.stencil_dim - 1))))
             cur_size = cut_off_n
             prev_size = 0
@@ -839,9 +868,9 @@ class PModelKernel:
         samples.sort(key=lambda x: x.first)
         return samples
 
-    def determine_max_ns_of_working_sets(self, machine: Machine, method: ODEMethod, avail_cache: float) -> List[int]:
+    def determine_max_ns_of_working_sets(self, machine: Machine, method: ODEMethod) -> List[int]:
         """
-        Determine the maximum IVP size 'n' that still fit into the cache level, and working sets given by the run
+        Determine the maximum IVP size 'n' that still fit into the cache level and working sets given by the run
         configuration and this object.
 
         Parameters:
@@ -850,28 +879,52 @@ class PModelKernel:
             Trained machine.
         method: ODE method
             Trained ODE method.
-        avail_cache : float
-            Fraction of the total cache size at most used for working set data.
 
         Returns:
         --------
         list of int
             Maximal system sizes fitting into the particular cache levels and working sets.
         """
-        assert avail_cache <= 1.0
-        # Define some constants that might be part of the arithmetical working set expressions.
-        constants = [corrector_steps(method), stages(method), cacheline_elements(machine)]
+
         # For each cache level and working set permutation, determine the maximum IVP system size 'n' that still fits
         # into that level and working set.
         max_ns = list()
         for cache in [machine.l1CacheElements, machine.l2CacheElements, machine.l3CacheElements]:
-            for wset in self.workingSets:
-                # Solve equation 'wset = avail_cache * cache'.
-                solution = solve_equation(wset, '{}*{}'.format(avail_cache, cache), 'n', constants)
-                # Get end from the solution of the equation
-                max_ns.append(int(solution[0]))
+            max_ns.extend(self.determine_max_n_of_working_sets_for_cache_lvl(machine, method, cache))
         # Sort working set ends by size to iterate list in order when creating the SampleInterval objects.
         max_ns.sort()
+        return max_ns
+
+    def determine_max_n_of_working_sets_for_cache_lvl(self, machine: Machine, method: ODEMethod, cache_elements: int):
+        """
+        Determine the maximum syste size 'n' that still fit into the particular given cache level and working sets given
+        by the run configuration and this object.
+
+        Parameters:
+        -----------
+        machine: Machine
+            Used machine.
+        method: ODE method
+            Used ODE method.
+        cache_elements: int
+            Maximum number of elements fitting into the particular cache level considered.
+
+        Returns:
+        --------
+        list of int
+            Maximal system sizes fitting into the particular cache levels and working sets.
+        """
+        avail_cache_size = offsite.config.offsiteConfig.available_cache_size
+        assert avail_cache_size <= 1.0
+        # Define some constants that might be part of the arithmetical working set expressions.
+        constants = [corrector_steps(method), stages(method), cacheline_elements(machine)]
+        # Determine the maximum system size 'n' that still fits into that level and working set.
+        max_ns = list()
+        for wset in self.workingSets:
+            # Solve equation 'wset = avail_cache * cache'.
+            solution = solve_equation(wset, '{}*{}'.format(avail_cache_size, cache_elements), 'n', constants)
+            # Get end from the solution of the equation
+            max_ns.append(int(solution[0]))
         return max_ns
 
 

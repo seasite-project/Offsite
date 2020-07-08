@@ -84,6 +84,8 @@ class Config:
     samples_per_border = attr.ib(type=int, default=2)
     step_between_border_samples = attr.ib(type=float, default=100)
     memory_lvl_sample_offset = attr.ib(type=float, default=1.25)
+    # ... for layer condition analysis
+    layer_condition_safety_margin = attr.ib(type=float, default=2.0)
     # ... for benchmarking
     repetitions_communication_operations = attr.ib(type=int, default=100)
     # ... for code generation
@@ -138,6 +140,12 @@ class Config:
             tag_memory = 'MemoryLvlSampleOffset'
             if tag_memory in parser[tag_ws]:
                 config_obj.memory_lvl_sample_offset = float(parser[tag_ws][tag_memory])
+        # ... layer condition analysis.
+        tag_lc = 'LAYER CONDITION'
+        if tag_lc in parser:
+            tag_margin = 'SafetyMargin'
+            if tag_margin in parser[tag_lc]:
+                config_obj.layer_condition_safety_margin = float(parser[tag_lc][tag_margin])
         # ... benchmarking.
         tag_bench = 'BENCHMARK'
         if tag_bench in parser:

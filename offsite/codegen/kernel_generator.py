@@ -10,9 +10,11 @@ from sortedcontainers import SortedDict
 
 import offsite.config
 from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
-from offsite.codegen.codegen_util import eval_loop_boundary, substitute_rhs_func, write_closing_bracket
+from offsite.codegen.codegen_util import eval_loop_boundary, substitute_rhs_func, write_closing_bracket, \
+    write_tiling_loop
 from offsite.descriptions.kernel_template import Kernel
 from offsite.descriptions.ode_method import ODEMethod
+from offsite.evaluation.math_utils import corrector_steps, stages
 
 
 @attr.s
@@ -83,7 +85,7 @@ class KernelCodeGenerator:
                 break
             CodeTree.unroll_loop(self.unroll_stack.values()[0][0])
 
-    def generate(self, kernel: 'Kernel', method: 'ODEMethod', input_vector: str) -> str:
+    def generate(self, kernel: 'Kernel', method: 'ODEMethod', input_vector: str, gen_tiled_code: bool) -> str:
         """Generate kernel code for a particular Kernel object.
 
         Parameters:
@@ -94,6 +96,8 @@ class KernelCodeGenerator:
             ODE method for which code is generated.
         input_vector: str
             Name of the used input vector name.
+        gen_tiled_code: bool
+            Generated tiled code version.
 
         Returns:
         --------
@@ -133,7 +137,7 @@ class KernelCodeGenerator:
         else:
             rhs_func = None
         # Generate code from tree and write to string.
-        code = self.generate_kernel_code(code_tree, rhs_func)
+        code = self.generate_kernel_code(code_tree, gen_tiled_code, rhs_func)
         return code
 
     @staticmethod
@@ -157,14 +161,15 @@ class KernelCodeGenerator:
         """
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            node.boundary = eval_loop_boundary(method, node.boundary)
+            constants = [corrector_steps(method), stages(method)]
+            node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.COMPUTATION:
             template = kernel.template
             # Substitute computation.
             node.computation = template.computations[node.computation].computation
             # Check if computation includes RHS calls.
             if '%RHS' in node.computation:
-                assert 'RHS' in template.codegen
+                assert ('RHS' in template.codegen or 'RHS' in kernel.codegen)
                 assert 'RHS_butcher_nodes' in template.codegen
                 rhs_func = template.codegen['RHS'] if 'RHS' not in kernel.codegen else kernel.codegen['RHS']
                 butcher_node = template.codegen['RHS_butcher_nodes']
@@ -174,6 +179,8 @@ class KernelCodeGenerator:
         elif node.type == CodeNodeType.COMMUNICATION:
             # TODO add support later
             pass
+        elif node.type == CodeNodeType.ROOT:
+            node.name = kernel.name
         # Traverse tree depth first.
         if node.child:
             KernelCodeGenerator.generate_kernel_tree(node.child, kernel, method, input_vector)
@@ -181,7 +188,8 @@ class KernelCodeGenerator:
             KernelCodeGenerator.generate_kernel_tree(node.next, kernel, method, input_vector)
 
     @staticmethod
-    def generate_kernel_code(node: CodeNode, rhs_func: str = None, code: str = ''):
+    def generate_kernel_code(
+            node: CodeNode, gen_tiled_code: bool, rhs_func: str = None, kernel_name: str = '', code: str = ''):
         """Write kernel code.
 
         Parameters:
@@ -190,6 +198,10 @@ class KernelCodeGenerator:
             Root node of the code tree.
         rhs_func: str
             Name of the used RHS function.
+        gen_tiled_code: bool
+            Generated tiled code version.
+        kernel_name: str
+            Name of the generated kernel.
         code: str
             Current code string.
 
@@ -205,15 +217,25 @@ class KernelCodeGenerator:
                 # Loop is replaced by RHS eval_range call and can thus be skipped.
                 loop_skipped = True
             else:
-                code += node.to_kernel_codeline()
+                if gen_tiled_code:
+                    code += node.to_tiling_kernel_codeline(kernel_name)
+                else:
+                    code += node.to_kernel_codeline()
+        elif node.type == CodeNodeType.ROOT and gen_tiled_code:
+            kernel_name = node.name
+            code += write_tiling_loop(kernel_name, node.indent)
         elif node.type != CodeNodeType.ROOT and node.type != CodeNodeType.PMODEL:
             code += node.to_kernel_codeline()
         # Traverse tree depth first.
         if node.child:
-            code += KernelCodeGenerator.generate_kernel_code(node.child, rhs_func)
+            code += KernelCodeGenerator.generate_kernel_code(node.child, gen_tiled_code, rhs_func, kernel_name)
         if node.type == CodeNodeType.LOOP:
             if not loop_skipped:
                 code += write_closing_bracket(node.indent)
         if node.next:
-            code += KernelCodeGenerator.generate_kernel_code(node.next, rhs_func)
+            code += KernelCodeGenerator.generate_kernel_code(node.next, gen_tiled_code, rhs_func, kernel_name)
+        if node.type == CodeNodeType.ROOT and gen_tiled_code:
+            # Close previously opened tiling loops.
+            code += write_closing_bracket(node.indent)
+            code += write_closing_bracket(node.indent)
         return code

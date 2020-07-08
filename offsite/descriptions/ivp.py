@@ -56,12 +56,14 @@ class IVP:
     code_eval_component = attr.ib(type=str)
     code_stencil_path = attr.ib(type=str)
     code_initial_values = attr.ib(type=str)
+    code_required_indices = attr.ib(type=str)
     modelTool = attr.ib(type=ModelToolType)
     components_serial = attr.ib(type=str, init=False)
     constants_serial = attr.ib(type=str, init=False)
     code_eval_range_serial = attr.ib(type=str, init=False)
     code_eval_component_serial = attr.ib(type=str, init=False)
     code_initial_values_serial = attr.ib(type=str, init=False)
+    code_required_indices_serial = attr.ib(type=str, init=False)
     db_id = attr.ib(type=int, init=False)
 
     # Database information.
@@ -76,6 +78,7 @@ class IVP:
                      Column('code_eval_component_serial', String),
                      Column('code_stencil_path', String),
                      Column('code_initial_values_serial', String),
+                     Column('code_required_indices_serial', String),
                      Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
@@ -122,6 +125,8 @@ class IVP:
             code_eval_range = yaml['codegen']['eval_range']
             # Attribute code_eval_component.
             code_eval_component = yaml['codegen']['eval_component']
+            # Attribute code_required_indices.
+            code_required_indices = yaml['codegen']['required_indices']
             # Add empty string for unused codegen properties.
             code_stencil_path = ''
         elif model_tool == ModelToolType.YASKSITE:
@@ -134,11 +139,12 @@ class IVP:
             # Add empty string for unused codegen properties.
             code_eval_range = ''
             code_eval_component = ''
+            code_required_indices = ''
         # Attribute code_initial_values.
         code_initial_values = yaml['codegen']['initial_values']
         # Create object.
         return cls(name, grid_size, characteristic, components, constants, code_eval_range, code_eval_component,
-                   code_stencil_path, code_initial_values, model_tool)
+                   code_stencil_path, code_initial_values, code_required_indices, model_tool)
 
     @classmethod
     def from_database(cls, db_session: Session, ivp_name: str) -> 'IVP':
@@ -180,6 +186,8 @@ class IVP:
         ivp.code_eval_component = deserialize_obj(ivp.code_eval_component_serial)
         # Attribute code_initial_values.
         ivp.code_initial_values = deserialize_obj(ivp.code_initial_values_serial)
+        # Attribute code_initial_values.
+        ivp.code_required_indices = deserialize_obj(ivp.code_required_indices_serial)
         return ivp
 
     def __attrs_post_init__(self):
@@ -226,6 +234,15 @@ class IVP:
             ivp.code_eval_component = self.code_eval_component
             # Initial_value function.
             ivp.code_initial_values = self.code_initial_values
+            # Required_indices function.
+            ivp.code_required_indices = self.code_required_indices
+            # Update serialized members.
+            ivp.components_serial = serialize_obj(ivp.components)
+            ivp.constants_serial = serialize_obj(ivp.constants)
+            ivp.code_eval_range_serial = serialize_obj(ivp.code_eval_range)
+            ivp.code_eval_component_serial = serialize_obj(ivp.code_eval_component_serial)
+            ivp.code_initial_values_serial = serialize_obj(ivp.code_initial_values)
+            ivp.code_required_indices_serial = serialize_obj(ivp.code_required_indices)
             return ivp
         # Add new object to database.
         # Serialize data.
@@ -234,6 +251,7 @@ class IVP:
         self.code_eval_range_serial = serialize_obj(self.code_eval_range)
         self.code_eval_component_serial = serialize_obj(self.code_eval_component)
         self.code_initial_values_serial = serialize_obj(self.code_initial_values)
+        self.code_required_indices_serial = serialize_obj(self.code_required_indices)
         # IVP object.
         insert(db_session, self)
         # IVPCharacteristic object.
@@ -308,6 +326,7 @@ class IVPCharacteristic:
     ivp = attr.ib(type=IVP)
     isSparse = attr.ib(type=bool)
     isStencil = attr.ib(type=bool)
+    access_distance = attr.ib(type=str)
     computationType = attr.ib(type=IVPComputationType, default=IVPComputationType.UNKNOWN)
     stencil_radius = attr.ib(type=Integer, default=None)
     stencil_dim = attr.ib(type=Integer, default=None)
@@ -321,6 +340,7 @@ class IVPCharacteristic:
                      Column('isSparse', Boolean),
                      Column('isStencil', Boolean),
                      Column('computationType', String),
+                     Column('access_distance', String),
                      Column('stencil_radius', Integer),
                      Column('stencil_dim', Integer),
                      Column('updatedIn', String, default=__version__),
@@ -357,6 +377,14 @@ class IVPCharacteristic:
             elif component.component_type == IVPComputationType.MIX or ctype != component.component_type:
                 ctype = 'mixed-bound'
                 break
+        # Attribute access distance.
+        access_distance = None
+        for entry in yaml:
+            if isinstance(entry, dict):
+                if 'access_distance' in entry:
+                    access_distance = str(entry['access_distance'])
+                    break
+        assert access_distance is not None
         # Stencil-specific attributes.
         stencil_radius = None
         stencil_dim = None
@@ -374,7 +402,7 @@ class IVPCharacteristic:
             if not stencil_radius:
                 raise RuntimeError('Stencil-like IVP \'{}\' requires attribute \'stencil_radius\''.format(ivp.name))
         # Create object.
-        return cls(ivp, is_sparse, is_stencil, ctype, stencil_radius, stencil_dim)
+        return cls(ivp, is_sparse, is_stencil, access_distance, ctype, stencil_radius, stencil_dim)
 
     @classmethod
     def from_database(cls, db_session: Session, ivp_id: int) -> 'IVPCharacteristic':

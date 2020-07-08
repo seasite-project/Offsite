@@ -130,20 +130,20 @@ class ODEMethod:
             Created ODEMethod object.
         """
         try:
-            ode_method = db_session.query(ODEMethod).filter(ODEMethod.name.like(ode_method_name)).one()
+            method = db_session.query(ODEMethod).filter(ODEMethod.name.like(ode_method_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load ODEMethod object from database!')
         except MultipleResultsFound:
             raise RuntimeError('Unable to load ODEMethod object from database!')
         # Attribute coefficientsA.
-        ode_method.coefficientsA = list()
-        for row in ode_method.coefficientsA_serial.split(';'):
-            ode_method.coefficientsA.append(row.split(','))
+        method.coefficientsA = list()
+        for row in method.coefficientsA_serial.split(';'):
+            method.coefficientsA.append(row.split(','))
         # Attribute coefficientsB.
-        ode_method.coefficientsB = ode_method.coefficientsB_serial.split(',')
+        method.coefficientsB = method.coefficientsB_serial.split(',')
         # Attribute coefficientsC.
-        ode_method.coefficientsC = ode_method.coefficientsC_serial.split(',')
-        return ode_method
+        method.coefficientsC = method.coefficientsC_serial.split(',')
+        return method
 
     def to_database(self, db_session: Session):
         """Push this ODEMethod object to the database.

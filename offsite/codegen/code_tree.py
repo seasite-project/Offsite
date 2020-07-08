@@ -6,6 +6,7 @@ KernelNode, PModelNode, CodeTree, CodeTreeGenerator.
 from abc import abstractmethod
 from copy import deepcopy
 from enum import Enum
+from re import sub
 from typing import List, Tuple
 
 import attr
@@ -342,6 +343,30 @@ class LoopNode(CodeNode):
             first) + '; ' + self.var + comparator + \
                last + '; ++' + self.var + ') {' + '\n'
 
+    def to_tiling_kernel_codeline(self, block_varname: str) -> str:
+        """Write node content to tiling kernel code line.
+
+        Parameters:
+        -----------
+        block_varname: str
+        Name suffix of the block size variable.
+
+        Returns:
+        --------
+        str
+            Written code line.
+        """
+        config = offsite.config.offsiteConfig
+        # We only support tiling the system dimension loop right now.
+        assert self.var == config.var_idx
+        # Write pragmas.
+        pragmas = '\n'.join(self.pragmas) + ('\n' if self.pragmas else '')
+        # Write code.
+        bs_var = 'bs_{}'.format(block_varname)
+        return pragmas + indent(
+            self.indent) + 'for (int ' + self.var + '= jj; ' + self.var + ' < ' + bs_var + ' + jj; ++' + self.var + \
+               ') {' + '\n'
+
     def to_yasksite_codeline(self) -> str:
         """Write node content to yasksite code line.
 
@@ -398,6 +423,21 @@ class CommunicationNode(CodeNode):
          """
         if self.operation == 'omp_barrier':
             return '#pragma omp barrier \n'
+        elif self.operation == 'mpi_allgather':
+            assert self.input_var_name is not None
+            code = '#pragma omp master\n'
+            code += '{\n'
+            code += 'MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, {}, NP, MPI_DOUBLE, MPI_COMM_WORLD);'.format(
+                self.input_var_name)
+            code += '}\n'
+            return code
+        elif self.operation == 'mpi_communicate':
+            assert self.input_var_name is not None
+            code = '#pragma omp master\n'
+            code += '{\n'
+            code += 'communicate({});'.format(self.input_var_name)
+            code += '}\n'
+            return code
         raise RuntimeError('Communication node contains unknown/unsupported communication operation!')
 
     def to_implementation_codeline(self, ivp: 'IVP' = None) -> str:
@@ -622,9 +662,12 @@ class CommandNode(CodeNode):
              Written code line.
          """
         string = '\n'
+        string += '#pragma omp master\n'
+        string += '{\n'
         string += indent(self.indent) + self.datatype + '** tmp = ' + self.arg1 + ' ;\n'
         string += indent(self.indent) + self.arg1 + ' = ' + self.arg2 + ' ;\n'
         string += indent(self.indent) + self.arg2 + ' = tmp;\n'
+        string += '}\n'
         string += '\n'
         return string
 
@@ -725,7 +768,7 @@ class KernelNode(CodeNode):
          """
         return indent(self.indent) + 'KERNEL ' + self.template_name + '\n'
 
-    def to_implementation_codeline(self, kernel_code: str, kernel_id: int, incl_instrumentation=True) -> str:
+    def to_implementation_codeline(self, kernel_code: str, kernel_id: int, incl_instrumentation: bool = True) -> str:
         """Write node content to implementation code line.
 
          Parameters:
@@ -886,7 +929,7 @@ class CodeTree:
     root = attr.ib(type=CodeNode, default=RootNode(0, CodeNodeType.ROOT, None, None, None, None))
 
     @staticmethod
-    def substitute_butcher_coefficients(node: CodeNode, method: ODEMethod):
+    def substitute_butcher_coefficients(node: CodeNode, method: ODEMethod, use_dummy_values=False):
         """
         Recursively substitute all occurrences of butcher table entries in the passed code tree with the coefficient
         values provided by the given ODE method.
@@ -916,11 +959,18 @@ class CodeTree:
             for idx, elem in enumerate(method.coefficientsC):
                 evaluated = eval_math_expr(elem, cast_to=str)
                 node.computation = node.computation.replace('c[{}]'.format(idx), evaluated)
+            # Replace not already substituted coefficients with dummy values. Helps enabling running some kernels
+            # in kerncraft LC mode.
+            if use_dummy_values:
+                node.computation = sub(r'A\[[\w|\s|\d][\w|\s|\d|+|-|\*/]?\]\[[\w|\s|\d][\w|\s|\d|\+-|\*/]?\]',
+                                       '0.123', node.computation)
+                node.computation = sub(r'b\[[\w|\s|\d][\w|\s|\d|+|-|*|/]?\]', '0.456', node.computation)
+                node.computation = sub(r'c\[[\w|\s|\d][\w|\s|\d|+|-|*|/]?\]', '0.789', node.computation)
         # Traverse tree depth first.
         if node.child:
-            CodeTree.substitute_butcher_coefficients(node.child, method)
+            CodeTree.substitute_butcher_coefficients(node.child, method, use_dummy_values)
         if node.next:
-            CodeTree.substitute_butcher_coefficients(node.next, method)
+            CodeTree.substitute_butcher_coefficients(node.next, method, use_dummy_values)
 
     @staticmethod
     def unroll_loop(loop: CodeNode):
@@ -1000,8 +1050,8 @@ class CodeTree:
             while cur is not None:
                 cur.computation = replace_var_with_factor(loop.var, cur.computation, loop.start)
                 cur.computation = replace_incr_with_assign_op(cur.computation) if (
-                            loop.optimize_assign is not None and loop.optimize_assign == int(
-                        loop.start)) else cur.computation
+                        loop.optimize_assign is not None and loop.optimize_assign == int(
+                    loop.start)) else cur.computation
                 cur = cur.next
             # ..... unroll iteration 'start'.
             for idx in range(int(loop.start) + 1, int(loop.boundary)):
@@ -1011,7 +1061,7 @@ class CodeTree:
                 while cur is not None:
                     cur.computation = replace_var_with_factor(loop.var, cur.computation, str(idx))
                     cur.computation = replace_incr_with_assign_op(cur.computation) if (
-                                loop.optimize_assign is not None and loop.optimize_assign == idx) else cur.computation
+                            loop.optimize_assign is not None and loop.optimize_assign == idx) else cur.computation
                     cur = cur.next
                 while cur_loop_bdy.next is not None:
                     cur_loop_bdy = cur_loop_bdy.next
@@ -1128,6 +1178,96 @@ class CodeTree:
             CodeTree.replace_loop_var_with_iteration_idx(node.child, loop)
         if node.next:
             CodeTree.replace_loop_var_with_iteration_idx(node.next, loop)
+
+    @staticmethod
+    def iteration_count(node: CodeNode, iter_count: str = '') -> str:
+        """Count the total number of loop iteration of the current node's subtree.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        iter_count: str
+            Current loop iteration count.
+
+        Returns:
+        --------
+        str
+            Total number of loop iterations of the start node's subtree.
+        """
+        if node.type == CodeNodeType.LOOP and 'unroll' not in node.optional_args:
+            if iter_count:
+                iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
+            else:
+                iter_count = '({} - {})'.format(node.boundary, node.start)
+        if node.child:
+            iter_count = CodeTree.iteration_count(node.child, iter_count)
+        if node.next and node.type is not CodeNodeType.PMODEL:
+            iter_count = CodeTree.iteration_count(node.next, iter_count)
+        return iter_count
+
+    @staticmethod
+    def iteration_count_up_to_root(node: CodeNode, iter_count: str = '') -> str:
+        """Count the total number of loop iteration from the current node up to the root node.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        iter_count: str
+            Current loop iteration count.
+
+        Returns:
+        --------
+        str
+            Total number of loop iterations from the start node to the root node.
+        """
+        if node.type == CodeNodeType.LOOP and 'unroll' not in node.optional_args:
+            if iter_count:
+                iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
+            else:
+                iter_count = '({} - {})'.format(node.boundary, node.start)
+        if node.parent:
+            iter_count = CodeTree.iteration_count(node.parent, iter_count)
+        return iter_count
+
+    @staticmethod
+    def find_pmodel_node(node: CodeNode, requested_idx: int, nxt_visited_idx=0,
+                         found_node: CodeNode = None) -> PModelNode:
+        """Traverse node's subtree and return the 'requested_idx' occurrence of a PModelNode object.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Root node of the code tree.
+        requested_idx: int
+            xxx
+        nxt_visited: int
+            xyy
+        found_node: CodeNode
+            Used loop node that determines the loop variable name and loop iteration index.
+
+        Returns:
+        --------
+        PModelNode
+            Found node.
+            Returns None if no proper CodeNode object was found.
+        """
+        if node.type == CodeNodeType.ROOT:
+            if requested_idx == 0:
+                return node, nxt_visited_idx + 1
+            nxt_visited_idx += 1
+        elif node.type == CodeNodeType.PMODEL:
+            if nxt_visited_idx == requested_idx:
+                return node, nxt_visited_idx + 1
+            nxt_visited_idx += 1
+        if node.child:
+            found_node, nxt_visited_idx = CodeTree.find_pmodel_node(node.child, requested_idx, nxt_visited_idx,
+                                                                    found_node)
+        if node.next:
+            found_node, nxt_visited_idx = CodeTree.find_pmodel_node(node.next, requested_idx, nxt_visited_idx,
+                                                                    found_node)
+        return found_node, nxt_visited_idx
 
     @staticmethod
     def update_indent(node: CodeNode, change_by_val: int):

@@ -1,4 +1,4 @@
-"""@package parser_util
+"""@package parser_utils
 Util functions, classes used during YAML parsing.
 """
 
@@ -6,10 +6,10 @@ from codecs import decode, encode
 from enum import IntEnum
 from pathlib import Path
 from pickle import dumps, loads, HIGHEST_PROTOCOL
+from re import findall, split as re_split, S
 from typing import Dict, List, Tuple, Union
 
 import attr
-from pcre import findall, split as pcre_split, S, sub
 from ruamel import yaml
 
 
@@ -229,14 +229,13 @@ class ConstantDict(dict):
         # Insert datastruct.
         for constant in constants:
             constant = constant.strip()
-            # Parse constant string using regular expressions...
-            parts = pcre_split(r'=*', constant)
+            parts = re_split(r'=', constant)
             assert len(parts) == 2
             # ... value
             value = parts[1].strip()
             # Parse lhs of constant expression.
             lhs = parts[0].strip()
-            parts = pcre_split(r'[ ]*', lhs)
+            parts = re_split(r'\s+', lhs)
             assert len(parts) == 2
             # ... datatype
             datatype = parts[0]
@@ -333,7 +332,7 @@ class DatastructDesc:
         # Attribute type.
         struct_type = DatastructType(dimensions.count('['))
         # Attribute size.
-        dimensions = findall(r'[A-Za-z0-9]+', dimensions, S)
+        dimensions = findall(r'\w+', dimensions, S)
         if struct_type == DatastructType.scalar:
             size = '1'
         elif struct_type in (DatastructType.array1D, DatastructType.array2D, DatastructType.array3D):
@@ -485,16 +484,16 @@ class DatastructDict(dict):
         for datastruct in datastructs:
             datastruct = datastruct.strip()
             # Parse datastruct string using regular expressions...
-            parts = pcre_split(r'[ ]*', datastruct)
+            parts = re_split(r'\s+', datastruct)
             assert len(parts) in [2, 3]
             # ... check if datatype is a parameter in yasksite mode
             if '@' in parts[0]:
                 is_yasksite_param = True
-                parts[0] = sub('@', '', parts[0])
+                parts[0] = parts[0].replace('@', '')
             else:
                 is_yasksite_param = False
             # ... datatype
-            datatype = parts[0]
+            datatype = parts[0].strip()
             if len(parts) == 3:
                 # ... name
                 name = parts[1].strip()
@@ -502,7 +501,7 @@ class DatastructDict(dict):
                 size = parts[2].strip()
             else:
                 parts = parts[1].strip()
-                parts = pcre_split(r'\[', parts, maxsplit=1)
+                parts = re_split(r'\[', parts, maxsplit=1)
                 # ... name
                 name = parts[0].strip()
                 # ... dimension
@@ -548,98 +547,6 @@ class DatastructDict(dict):
             raise RuntimeError('Datastruct \'{}\' not in dict!'.format(name))
 
 
-@attr.s
-class LoopDesc:
-    """Representation of a single loop of a kernel.
-    """
-    iterations = attr.ib(type=str)
-    split = attr.ib(type=str)
-
-    @classmethod
-    def from_yaml(cls, yaml_data: dict) -> 'LoopDesc':
-        """Construct LoopDesc object from YAML definition.
-
-        Parameters:
-        -----------
-        yaml_data: dict
-            YAML object describing this object.
-
-        Returns:
-        --------
-        Kernel
-            Created LoopDesc object.
-        """
-        # Attribute iterations.
-        iterations = yaml_data['iterations']
-        # Attribute split.
-        split = yaml_data['split']
-        # Create object.
-        return cls(iterations, split)
-
-
-class LoopDict(dict):
-    """Dictionary to store the loops of a kernel.
-    """
-
-    @classmethod
-    def from_data(cls, loops: List[str]) -> 'LoopDict':
-        """Construct initialized LoopDict object.
-
-        Parameters:
-        -----------
-        loops : list
-            List of loop descriptions to be stored.
-
-        Returns:
-        --------
-        LoopDict
-            Created LoopDict object.
-        """
-        dict_obj = cls.__new__(cls)
-        # Insert loop.
-        for loop in loops:
-            name = loop['name']
-            if dict_obj.__contains__(name):  # Ignore duplicate keys.
-                pass
-            else:
-                dict_obj[name] = LoopDesc.from_yaml(loop)
-        return dict_obj
-
-    def get_loop(self, name: str) -> LoopDesc:
-        """Return description of a loop in the dictionary.
-
-        Searches for loop 'name' in the dictionary and returns its loop description.
-
-        Parameters:
-        -----------
-        name: str
-            Identifier of the loop requested.
-
-        Returns:
-        --------
-        LoopDesc
-            Description of the loop requested.
-        """
-        try:
-            return next(filter(lambda x: x[0] == name, self.items()))[1]
-        except StopIteration:
-            raise RuntimeError('ERROR: Loop \'{}\' not in dict!'.format(name))
-
-    def serialize(self) -> str:
-        """Serialize dictionary data in base64 encoding.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Pickled representation of the dictionary data in base64 encoding.
-        """
-        return serialize_obj(self)
-
-
 def serialize_obj(obj) -> str:
     """Serialize object data in base64 encoding.
 
@@ -655,7 +562,7 @@ def serialize_obj(obj) -> str:
     return encode(dumps(obj, HIGHEST_PROTOCOL), 'base64').decode()
 
 
-def deserialize_obj(serialized_obj: str) -> Union[ComputationDesc, ConstantDesc, DatastructDesc, LoopDesc]:
+def deserialize_obj(serialized_obj: str) -> Union[ComputationDesc, ConstantDesc, DatastructDesc]:
     """Deserialize object data encoded in base64.
 
     Parameters:

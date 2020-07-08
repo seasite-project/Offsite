@@ -8,7 +8,7 @@ from time import time
 
 import offsite.config
 from offsite import __version__
-from offsite.config import ModelToolType, ProgramModeType, IncoreToolType, __bench_ext__, __config_ext__,\
+from offsite.config import ModelToolType, ProgramModeType, IncoreToolType, __bench_ext__, __config_ext__, \
     __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, init_config
 from offsite.db.db import commit, close, open_db
 from offsite.db.db_mapping import mapping
@@ -17,6 +17,7 @@ from offsite.evaluation.ranking import rank
 from offsite.train.train_communication import train_communication_costs
 from offsite.train.train_impl import train_impl_variant_predictions
 from offsite.train.train_kernel import train_kernel_predictions, train_kernel_runtimes
+from offsite.train.train_kernel_blocksize import train_kernel_blocksizes
 
 
 def parse_program_args_app_tune() -> 'argparse.Namespace':
@@ -126,6 +127,18 @@ def tune():
     train_communication_costs(db_session, machine, skeletons)
     if verbose:
         print(' done.')
+    # Train database with kernel block size predictions.
+    if args.tool == ModelToolType.KERNCRAFT or args.tool is None:
+        if verbose:
+            print('  * Kernel block sizes...', end='', flush=True)
+            start_time_block = time()
+        templates = train_kernel_blocksizes(db_session, machine, templates, methods, ivps)
+        templates = [template.to_database(db_session) for template in templates]
+        if verbose:
+            print(' done.')
+            stop_time_block = time()
+            print('#' * 80 + '\n')
+            print('Kernel block size phase took {} seconds.'.format(round(stop_time_block - start_time_block, 3)))
     # Train database with kernel runtime predictions.
     if verbose:
         print('  * Kernel predictions...', end='', flush=True)

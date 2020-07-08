@@ -12,8 +12,7 @@ from typing import Dict
 
 import attr
 from kerncraft.prefixedunit import PrefixedUnit
-from sqlalchemy import Column, DateTime, Float, Integer, String, Table, \
-    UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
@@ -177,7 +176,7 @@ class Machine:
     coresPerSocket = attr.ib(type=int)
     coresPerNumaDomain = attr.ib(type=int)
     numaDomainsPerSocket = attr.ib(type=int)
-    #sockets = attr.ib(type=int)
+    # sockets = attr.ib(type=int)
     cachelineSize = attr.ib(type=float)
     elements_per_cacheline = attr.ib(type=float)
     l1Cache = attr.ib(type=float)
@@ -253,6 +252,19 @@ class Machine:
             assert False
         # Attribute in-core model.
         in_core_model = yaml['in-core model']
+        # .. check if this machine supports the selected in-core model tool.
+        try:
+            if config.args.incore in (IncoreToolType.OSACA, IncoreToolType.IACA, IncoreToolType.LLVMMCA):
+                if config.args.incore.value not in in_core_model:
+                    raise RuntimeError(
+                        'Machine \'{}\' does not support in-core model \'{}\'!'.format(path, config.args.incore.value))
+            else:
+                assert False
+        except AttributeError:
+            # Use OSACA as default if incore not given in config arguments.
+            if config.args.verbose:
+                print('DEBUG: machine incore model')
+            config.args.incore = IncoreToolType.OSACA
         # Attribute model_type.
         model_type = yaml['model type']
         # Attribute model_name.
@@ -266,7 +278,8 @@ class Machine:
         # Attribute numa_domains_per_socket.
         numa_domains_per_socket = yaml['NUMA domains per socket']
         # Attribute sockets.
-        #sockets = yaml['sockets']
+        # sockets = yaml['sockets']
+        # todo needed?
         # Attribute cacheline_size [in bytes].
         cacheline_size = yaml['cacheline size'].base_value()
         # Elements per cache line.
@@ -377,7 +390,7 @@ class Machine:
         if machine:
             # Supplement attributes not saved in database.
             machine.path = self.path
-            #machine.sockets = self.sockets
+            # machine.sockets = self.sockets
             machine.elements_per_cacheline = self.elements_per_cacheline
             machine.l1CacheElements = self.l1CacheElements
             machine.l2CacheElements = self.l2CacheElements

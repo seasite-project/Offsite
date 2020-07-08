@@ -17,7 +17,8 @@ from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.benchmark import BenchmarkRecord
 from offsite.evaluation.math_utils import eval_math_expr, corrector_steps, ivp_grid_size, stages
-from offsite.evaluation.performance_model import compute_impl_variant_runtime_pred, ImplVariantRecord
+from offsite.evaluation.performance_model import compute_impl_variant_runtime_pred
+from offsite.evaluation.records import ImplVariantRecord
 from offsite.train.train_utils import deduce_available_impl_variants, deduce_impl_variant_sample_intervals, \
     fetch_and_sort_kernel_runtime_prediction_data
 

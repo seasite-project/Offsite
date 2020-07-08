@@ -10,10 +10,12 @@ from sqlalchemy.orm import Session
 from sympy import simplify
 
 import offsite.config
-from offsite.descriptions.impl_skeleton import ImplSkeleton, ImplVariant
+from offsite.descriptions.impl_skeleton import ImplSkeleton
+from offsite.descriptions.impl_variant import ImplVariant
 from offsite.descriptions.kernel_template import Kernel
 from offsite.evaluation.math_utils import eval_math_expr, interpolate_polynomial, ivp_system_size
-from offsite.evaluation.performance_model import KernelRecord, SampleInterval, SamplePosition
+from offsite.evaluation.performance_model import SampleInterval, SamplePosition
+from offsite.evaluation.records import KernelRecord
 
 IntervalRecordList = List[Tuple[SampleInterval, str]]
 

@@ -5,8 +5,9 @@ Main script of the offsite_bench application.
 from argparse import ArgumentParser
 from pathlib import Path
 
+import offsite.config
 from offsite import __version__
-from offsite.config import BenchType, Config, __config_ext__
+from offsite.config import BenchType, __config_ext__, init_config
 from offsite.descriptions.machine import Machine
 from offsite.evaluation.benchmark import OmpBarrierBenchmark
 
@@ -77,17 +78,17 @@ def write_benchmark_file(bench: BenchType, data, machine: 'Machine'):
             fhandle.write('  - {}\n'.format(rec.data))
 
 
-def run_benchmark(config: 'Config'):
+def run_benchmark():
     """Run the communication cost benchmark.
 
     Parameters:
     -----------
-    config: Config
-        Program configuration.
+    -
 
     Returns:
     -
     """
+    config = offsite.config.offsiteConfig
     # Parse passed machine file.
     machine = Machine.from_yaml(config.args.machine, config.args.compiler)
     # TODO Pin CPU frequency / check if pinned
@@ -114,7 +115,7 @@ def run():
     """
     # Create parser and parse arguments.
     args = parse_program_args_app_bench()
-    # Parse custom configuration file if present else use default configuration.
-    config = Config.from_file(args) if args.config else Config(args)
+    # Create custom or default configuration.
+    init_config(args)
     # Run bench app.
-    run_benchmark(config)
+    run_benchmark()

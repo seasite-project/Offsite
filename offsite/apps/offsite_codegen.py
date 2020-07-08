@@ -9,15 +9,30 @@ from pathlib import Path
 import offsite.config
 from offsite import __version__
 from offsite.codegen.impl_generator import ImplCodeGenerator
+from offsite.codegen.impl_generator_cpp import ImplCodeGeneratorCpp
 from offsite.config import __config_ext__, ModelToolType, init_config, __impl_skeleton_ext__, __ivp_ext__, \
     __kernel_template_ext__, __ode_method_ext__
 from offsite.db.db import open_db, commit
 from offsite.db.db_mapping import mapping
-from offsite.descriptions.impl_skeleton import ImplSkeleton, ImplVariant
+from offsite.descriptions.impl_skeleton import ImplSkeleton
+from offsite.descriptions.impl_variant import ImplVariant
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.descriptions.parser import parse_impl_skeletons, parse_ivp, parse_kernel_templates, parse_method
 from offsite.train.train_impl import deduce_available_impl_variants
+
+
+class LanguageType(Enum):
+    """Defines what type of code is generated.
+
+    - C
+        C style code.
+    - CPP
+        C++ style code.
+
+    """
+    C = 'C'
+    CPP = 'CPP'
 
 
 def create_args_parser_app_codegen() -> ArgumentParser:
@@ -39,7 +54,20 @@ def create_args_parser_app_codegen() -> ArgumentParser:
                         help='Print program version and exit.')
     parser.add_argument('--folder', action='store', default='tmp/variants', type=Path,
                         help='Path to the location of the generated code files.')
+    parser.add_argument('--folder_impl', action='store', default=None, type=Path,
+                        help='Path to the location of the generated implementation variant code files.'
+                             'Prioritized over option \'--folder\'.')
+    parser.add_argument('--folder_ivp', action='store', default=None, type=Path,
+                        help='Path to the location of the generated ODE problem code files.'
+                             'Prioritized over option \'--folder\'.')
+    parser.add_argument('--folder_method', action='store', default=None, type=Path,
+                        help='Path to the location of the generated ODE method code files.'
+                             'Prioritized over option \'--folder\'.')
     parser.add_argument('--db', action='store', default='tune.db', help='Path to database. Default: tune.db.')
+    parser.add_argument('--mode', action='store', required=True, type=LanguageType,
+                        help='Supported program languages: C (default), C++')
+    parser.add_argument('--tile', action='store_true', default=False,
+                        help='If set to true an extra tiling version is generated for each implementation variant.')
     parser.add_argument('--config', action='store', type=Path,
                         help='Tweak code generation process by passing a custom configuration ({}) file'.format(
                             __config_ext__))
@@ -140,10 +168,22 @@ def run_code_generation_db():
             raise RuntimeError(
                 'Implementation skeleton \'{}\' uses model tool \'{}\'! Application offsite_codegen supports only ' \
                 'model tool \'{}\'.!'.format(skeleton.name, skeleton.modelTool.value, ModelToolType.KERNCRAFT.value))
+    # Folders used to store generated code files.
+    folder_impl = config.args.folder_impl if config.args.folder_impl is not None else config.args.folder
+    folder_ivp = config.args.folder_ivp if config.args.folder_ivp is not None else config.args.folder
+    folder_method = config.args.folder_method if config.args.folder_method is not None else config.args.folder
     # Generate implementation variant codes.
     for skeleton in skeletons.values():
-        codes = ImplCodeGenerator(db_session, config.args.folder).generate(skeleton[0], skeleton[1], ivp, method)
-        ImplCodeGenerator.write_codes_to_file(codes)
+        if config.args.mode == LanguageType.C:
+            codes = ImplCodeGenerator(db_session, folder_impl, folder_ivp, folder_method).generate(
+                skeleton[0], skeleton[1], ivp, method)
+            ImplCodeGenerator.write_codes_to_file(codes)
+        elif config.args.mode == LanguageType.CPP:
+            codes = ImplCodeGeneratorCpp(db_session, folder_impl, folder_ivp, folder_method).generate(
+                skeleton[0], skeleton[1], ivp, method)
+            ImplCodeGeneratorCpp.write_codes_to_file(codes)
+        else:
+            assert False
 
 
 def run_code_generation_yaml():
@@ -174,6 +214,10 @@ def run_code_generation_yaml():
     # .. parse the IVP descriptions.
     ivp = parse_ivp(args.ivp, tool)
     ivp = ivp.to_database(db_session)
+    # Folders used to store generated code files.
+    folder_impl = config.args.folder_impl if config.args.folder_impl is not None else config.args.folder
+    folder_ivp = config.args.folder_ivp if config.args.folder_ivp is not None else config.args.folder
+    folder_method = config.args.folder_method if config.args.folder_method is not None else config.args.folder
     # Derive all available implementation variants ...
     for skeleton in skeletons:
         available_variants, _ = deduce_available_impl_variants(db_session, skeleton)
@@ -181,8 +225,16 @@ def run_code_generation_yaml():
         commit(db_session)
         # ... and generate implementation variant codes.
         impl_variants = [(impl.db_id, impl.kernels) for impl in available_variants]
-        codes = ImplCodeGenerator(db_session, config.args.folder).generate(skeleton, impl_variants, ivp, method)
-        ImplCodeGenerator.write_codes_to_file(codes)
+        if config.args.mode == LanguageType.C:
+            codes = ImplCodeGenerator(db_session, folder_impl, folder_ivp, folder_method).generate(
+                skeleton, impl_variants, ivp, method)
+            ImplCodeGenerator.write_codes_to_file(codes)
+        elif config.args.mode == LanguageType.CPP:
+            codes = ImplCodeGeneratorCpp(db_session, folder_impl, folder_ivp, folder_method).generate(
+                skeleton, impl_variants, ivp, method)
+            ImplCodeGeneratorCpp.write_codes_to_file(codes)
+        else:
+            assert False
 
 
 def run_db():

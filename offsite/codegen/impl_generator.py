@@ -13,13 +13,14 @@ from sortedcontainers import SortedDict
 
 import offsite.config
 from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
-from offsite.codegen.codegen_util import eval_loop_boundary, format_codefile, indent, write_closing_bracket
+from offsite.codegen.codegen_util import eval_loop_boundary, format_codefile, indent, write_closing_bracket, \
+    create_variantname
 from offsite.codegen.kernel_generator import KernelCodeGenerator
 from offsite.descriptions.impl_skeleton import ImplSkeleton
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.kernel_template import KernelTemplate, Kernel
 from offsite.descriptions.ode_method import ODEMethod
-from offsite.evaluation.math_utils import eval_math_expr
+from offsite.evaluation.math_utils import eval_math_expr, corrector_steps, stages
 
 
 @attr.s
@@ -28,18 +29,23 @@ class ImplCodeGenerator:
 
     Attributes:
     -----------
-    db_session:
-        TODO
-    folder:
-        TODO
+    db_session: sqlalchemy.orm.session.Session
+        Used database session.
+    folder_impl: Path
+        Folder all created implementation variant code files are stored in.
+    folder_ivp: Path
+        Folder all created IVP problem code files are stored in.
+    folder_method: Path
+        Folder all created ODE method code files are stored in.
     unroll_stack: SortedDict
         Stack of loops to be unrolled.
     loaded_templates: dict (key=str, val=KernelTemplate)
-        TODO
-
+        Required and already loaded kernel templates.
     """
     db_session = attr.ib(type='sqlalchemy.orm.session.Session')
-    folder = attr.ib(type=Path, default=Path('tmp/variants/'))
+    folder_impl = attr.ib(type=Path)
+    folder_ivp = attr.ib(type=Path)
+    folder_method = attr.ib(type=Path)
     unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
     loaded_templates = attr.ib(type=Dict, default=dict())
 
@@ -102,11 +108,18 @@ class ImplCodeGenerator:
         dict of str
             Generated implementation variant codes.
         """
+        config = offsite.config.offsiteConfig
+
         # Set some members to match current code generation.
         code_tree = deepcopy(skeleton.code_tree).root
         code_tree.name = skeleton.name
 
         self.unroll_stack.clear()
+        self.loaded_templates.clear()
+
+        # Create folder if it does not yet exist.
+        if self.folder_impl and not self.folder_impl.exists():
+            self.folder_impl.mkdir(parents=True)
 
         # Generate implementation code trees.
         self.generate_implementation_trees(code_tree, skeleton, method)
@@ -118,25 +131,15 @@ class ImplCodeGenerator:
             # Generate required kernel codes.
             kernels = self.derive_impl_variant_kernels(variant)
             # Generate implementation variant.
-            name = Path('{}/{}.h'.format(self.folder, self.create_variantname(kernels, skeleton)))
-            codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp)
+            name = Path('{}/{}.h'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+            codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, False)
+            # .. generate tiled version too?
+            if config.args.tile:
+                name = Path('{}/{}_tiled.h'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+                vid = 123456
+                # TODO fix variant number
+                codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, True)
         return codes
-
-    @staticmethod
-    def create_variantname(variant: List[Kernel], skeleton) -> str:
-        """Create filename of an implementation variant.
-
-        Parameters:
-        -----------
-        variant : list of Kernel
-            Kernels associated with this implementation variant.
-
-        Returns:
-        --------
-        str
-            Created filename.
-        """
-        return '{}_{}'.format(skeleton.name, '_'.join((kernel.name for kernel in variant)))
 
     def generate_implementation_trees(self, node: CodeNode, skeleton: 'ImplSkeleton', method: 'ODEMethod'):
         """Generate implementation variant code tree.
@@ -156,7 +159,8 @@ class ImplCodeGenerator:
         """
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            node.boundary = eval_loop_boundary(method, node.boundary)
+            constants = [corrector_steps(method), stages(method)]
+            node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.KERNEL:
             # Load kernel template from database.
             if node.template_name not in self.loaded_templates.keys():
@@ -181,7 +185,8 @@ class ImplCodeGenerator:
         except StopIteration:
             raise RuntimeError('')
 
-    def generate_impl_variant(self, impl: CodeNode, variant_id: int, kernels: List[Kernel], skeleton: ImplSkeleton, method: ODEMethod, ivp: IVP) -> str:
+    def generate_impl_variant(self, impl: CodeNode, variant_id: int, kernels: List[Kernel], skeleton: ImplSkeleton,
+                              method: ODEMethod, ivp: IVP, gen_tiled_code: bool = False) -> str:
         """Write implementation variant code.
 
         Parameters:
@@ -198,6 +203,8 @@ class ImplCodeGenerator:
             Used ODE method.
         ivp: IVP
             Used IVP.
+        gen_tiled_code: bool
+            Generated tiled code version.
 
         Returns:
         --------
@@ -205,15 +212,16 @@ class ImplCodeGenerator:
             Generated implementation variant code.
         """
         # Generate implementation variant code.
-        code = ImplCodeGenerator.generate_implementation_code(impl, kernels, method)
+        code = ImplCodeGenerator.generate_implementation_code(impl, kernels, method, gen_tiled_code)
         # Write frame code.
         code = self.write_skeleton_includes(variant_id, skeleton, method, ivp) + \
-               ImplCodeGenerator.write_function_description() + ImplCodeGenerator.write_instrument_impl(1) + code + '}'
+               ImplCodeGenerator.write_function_description() + ImplCodeGenerator.write_instrument_impl(variant_id) + \
+               code + '}'
         return code
 
     @staticmethod
-    def generate_implementation_code(
-            node: CodeNode, kernels: Dict[str, 'Kernel'], method: ODEMethod, code: str = '') -> str:
+    def generate_implementation_code(node: CodeNode, kernels: Dict[str, 'Kernel'], method: ODEMethod,
+                                     gen_tiled_code: bool, code: str = '') -> str:
         """Write implementation variant code.
 
         Parameters:
@@ -224,6 +232,8 @@ class ImplCodeGenerator:
             Used kernels.
         method: ODEMethod
             Used ODE method.
+        gen_tiled_code: bool
+            Generated tiled code version.
         code: str
             Current code string.
 
@@ -248,18 +258,18 @@ class ImplCodeGenerator:
                 else:
                     input_vector = config.ode_solution_vector
             # Create kernel code
-            kernel_code = KernelCodeGenerator().generate(kernel, method, input_vector)
+            kernel_code = KernelCodeGenerator().generate(kernel, method, input_vector, gen_tiled_code)
             code += node.to_implementation_codeline(kernel_code, kernel.db_id)
         elif node.type != CodeNodeType.ROOT:
             code += node.to_implementation_codeline()
         # Traverse tree depth first.
         if node.child:
-            code += ImplCodeGenerator.generate_implementation_code(node.child, kernels, method)
+            code += ImplCodeGenerator.generate_implementation_code(node.child, kernels, method, gen_tiled_code)
         # Close opened brackets.
         if node.type == CodeNodeType.LOOP:
             code += write_closing_bracket(node.indent)
         if node.next:
-            code += ImplCodeGenerator.generate_implementation_code(node.next, kernels, method)
+            code += ImplCodeGenerator.generate_implementation_code(node.next, kernels, method, gen_tiled_code)
         return code
 
     def write_skeleton_includes(self, variant_id: int, skeleton: ImplSkeleton, method: ODEMethod, ivp: IVP) -> str:
@@ -281,7 +291,6 @@ class ImplCodeGenerator:
         str
             Generated code.
         """
-        codegen = skeleton.codegen
         includes = ''
         # Add inclusion guard first.
         includes += '#pragma once\n\n'
@@ -297,8 +306,8 @@ class ImplCodeGenerator:
         includes += '#include "ODE_{}.h"\n'.format(method.name)
         self.write_ode_method(method)
         # Data structures.
-        if 'datastructs' in codegen:
-            includes += '#include "{}"\n'.format(codegen['datastructs'])
+        if 'datastructs' in skeleton.codegen:
+            includes += '#include "{}"\n'.format(skeleton.codegen['datastructs'])
         # Instrumentation.
         includes += '#ifdef INSTRUMENT\n#include "timesnap.h"\n#endif\n'
         return includes + '\n'
@@ -317,8 +326,8 @@ class ImplCodeGenerator:
         """
         config = offsite.config.offsiteConfig
         # Create folder if it does not yet exist.
-        if self.folder and not self.folder.exists():
-            self.folder.mkdir(parents=True)
+        if self.folder_ivp and not self.folder_ivp.exists():
+            self.folder_ivp.mkdir(parents=True)
         # Write inclusion guard first.
         rhs_func_str = '#pragma once\n\n'
         # Write IVP name.
@@ -348,7 +357,7 @@ class ImplCodeGenerator:
             regex = r'(?![a-zA-Z0-9]-_)' + name + r'(?![a-zA-Z0-9-_])'
             rhs_func_str = sub(regex, str(eval_math_expr(desc.value, constants)), rhs_func_str)
         # Write RHS function to file.
-        path = Path('{}/RHS_{}.h'.format(self.folder, ivp.name))
+        path = Path('{}/RHS_{}.h'.format(self.folder_ivp, ivp.name))
         with path.open('w') as file_handle:
             file_handle.write(rhs_func_str)
         # Format code with indent tool if available.
@@ -367,8 +376,8 @@ class ImplCodeGenerator:
         -
         """
         # Create folder if it does not yet exist.
-        if self.folder and not self.folder.exists():
-            self.folder.mkdir(parents=True)
+        if self.folder_method and not self.folder_method.exists():
+            self.folder_method.mkdir(parents=True)
         # Write inclusion guard first.
         method_str = '#pragma once\n\n'
         # Write method name and database id.
@@ -383,7 +392,7 @@ class ImplCodeGenerator:
         # Write butcher coefficients.
         method_str += self.write_butcher_table(method)
         # Write ODE method to file.
-        path = Path('{}/ODE_{}.h'.format(self.folder, method.name))
+        path = Path('{}/ODE_{}.h'.format(self.folder_method, method.name))
         with path.open('w') as file_handle:
             file_handle.write(method_str)
         # Format code with indent tool if available.
@@ -482,8 +491,7 @@ class ImplCodeGenerator:
         instr = '#ifdef INSTRUMENT\n'
         instr += indent(indent_lvl) + 'if (me == 0)\n'
         instr += indent(indent_lvl) + '{\n'
-        # TODO
-        # instr += indent(indent_lvl + 1) + r'printf("\n#ImplVariant-{}\n");'.format('')
+        instr += indent(indent_lvl + 1) + r'printf("\n#ImplVariant-{}\n");'.format(impl_variant_id)
         instr += indent(indent_lvl) + '}\n'
         instr += '#endif\n'
         return instr

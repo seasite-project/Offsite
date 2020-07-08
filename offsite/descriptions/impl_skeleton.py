@@ -10,11 +10,12 @@ from typing import Dict, List, Tuple
 
 import attr
 from lark import Lark
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Table, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum, Integer, String, Table
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
+from offsite.codegen.code_dsl import code_grammar
 from offsite.codegen.code_tree import CodeTree, CodeTreeGenerator
 from offsite.config import ModelToolType
 from offsite.db import METADATA
@@ -101,9 +102,7 @@ class ImplSkeleton:
         # Attribute name.
         name = yaml_path.stem
         # Attribute code_tree.
-        with open('offsite/codegen/code_dsl.lark') as f:
-            grammar = f.read()
-        parser = Lark(grammar, parser='lalr')
+        parser = Lark(code_grammar, parser='lalr')
         parsed_code = parser.parse(yaml['code'])
         code_tree = CodeTreeGenerator().generate(parsed_code)
         code_tree = deepcopy(code_tree)
@@ -225,6 +224,12 @@ class ImplSkeleton:
                     break
             skeleton.code_tree = self.code_tree
             skeleton.codegen = self.codegen
+            # Update serialized members.
+            skeleton.communication_operations_serial = serialize_obj(skeleton.communicationOperations)
+            skeleton.loops_serial = serialize_obj(skeleton.loops)
+            skeleton.kernels_serial = serialize_obj(skeleton.kernels)
+            skeleton.code_tree_serial = serialize_obj(skeleton.code_tree)
+            skeleton.codegen_serial = serialize_obj(skeleton.codegen)
             return skeleton
         # Add new object to database.
         # Serialize data.
@@ -282,6 +287,7 @@ class ImplSkeleton:
                 loop_iterations = line.split(' ')[2]
                 loop_stack.append(loop_name)
                 execution_count = execution_count * eval_math_expr(loop_iterations)
+                # todo for full mpi support --> exclude all loops that only execute communication operations
                 if loop_name in loops:
                     assert False
                 loops[loop_name] = eval_math_expr(execution_count)
@@ -318,7 +324,7 @@ class ImplSkeleton:
         for cores, row in bench_data.iterrows():
             costs[cores] = 0.0
             operation = row['name']
-            frequency = row['frequency']
+            # frequency = row['frequency']
             # Select measured benchmark result for this communication operation and multiply it with the number of
             # repetitions per iteration step of this operation.
             if operation in self.communicationOperations:
@@ -361,105 +367,3 @@ class ImplSkeleton:
         # Attribute codegen.
         skeleton.codegen = deserialize_obj(skeleton.codegen_serial)
         return skeleton
-
-
-@attr.s
-class ImplVariant:
-    """Representation of an ImplVariant table database record.
-
-    Attributes:
-    -----------
-    skeleton : int
-        Used impl skeleton.
-    kernels : list of int
-        Used machine.
-    db_id : int
-        ID of associated impl variant database table record.
-    """
-    skeleton = attr.ib(type=int)
-    kernels = attr.ib(type=List[int])
-    kernels_serial = attr.ib(type=int, init=False)
-    db_id = attr.ib(type=int, init=False)
-
-    # Database information.
-    db_table = Table('impl_variant', METADATA,
-                     Column('db_id', Integer, primary_key=True),
-                     Column('skeleton', Integer, ForeignKey('impl_skeleton.db_id')),
-                     Column('kernels_serial', Integer),
-                     Column('updatedIn', String, default=__version__),
-                     Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
-                     Column('updatedBy', String, default=getuser(), onupdate=getuser()),
-                     UniqueConstraint('skeleton', 'kernels_serial'),
-                     sqlite_autoincrement=True)
-
-    def to_database(self, db_session: Session):
-        """Push this ECM record object to the database.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-
-        Returns:
-        --------
-        ImplVariant
-            Instance of this object connected to database session.
-        """
-        # Attribute kernels_serial.
-        self.kernels_serial = ','.join(map(str, self.kernels))
-        # Check if database already contains this ImplVariant object.
-        variant = db_session.query(ImplVariant).filter(
-            ImplVariant.skeleton.is_(self.skeleton), ImplVariant.kernels_serial.is_(self.kernels_serial)).one_or_none()
-        if variant:
-            # Supplement attributes not saved in database.
-            variant.kernels = self.kernels
-            return variant
-        # Add new object to database.
-        # Attribute kernels_serial.
-        self.kernels_serial = ','.join(map(str, self.kernels))
-        # Insert ImplVariantRecord object.
-        insert(db_session, self)
-        return self
-
-    @staticmethod
-    def select_all(db_session: Session) -> List['ImplVariant']:
-        """Retrieve all ImplVariant table data record(s) from the database.
-
-        Parameters:
-        -----------
-        db_session: sqlalchemy.orm.session.Session
-            Used database session.
-
-        Returns:
-        --------
-        list of ImplVariant
-            Retrieved list of data records.
-        """
-        data = db_session.query(ImplVariant).all()
-        return data
-
-    @staticmethod
-    def select(db_session: Session, variant_ids: List[int]) -> List['ImplVariant']:
-        """
-        Retrieve the ImplVariant table data record(s) from the database that match the given implementation variant IDs.
-
-        Parameters:
-        -----------
-        db_session: sqlalchemy.orm.session.Session
-            Used database session.
-        variant_ids : list of int
-            IDs of the impl variants requested.
-
-        Returns:
-        --------
-        list of ImplVariant
-            Retrieved list of data records.
-        """
-        variants = db_session.query(ImplVariant).filter(ImplVariant.db_id.in_(variant_ids)).all()
-        if len(variants) != len(variant_ids):
-            raise RuntimeError('Unable to select all requested variants!')
-        # Deserialize attributes...
-        for variant in variants:
-            # Attribute kernels.
-            variant.kernels = variant.kernels_serial.split(',')
-        return variants

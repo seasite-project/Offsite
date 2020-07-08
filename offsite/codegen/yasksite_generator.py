@@ -174,7 +174,8 @@ class YasksiteCodeGenerator:
         """
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            node.boundary = eval_loop_boundary(method, node.boundary)
+            constants = [corrector_steps(method), stages(method)]
+            node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.COMPUTATION:
             # Substitute computation.
             node.computation = template.computations[node.computation].computation

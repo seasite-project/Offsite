@@ -17,7 +17,8 @@ from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.kerncraft_utils import execute_kerncraft_bench_mode, execute_kerncraft_ecm_mode, \
     parse_kerncraft_output_bench_mode, parse_kerncraft_output_ecm_mode
 from offsite.evaluation.performance_model import compute_pmodel_kernel_pred, compute_kernel_runtime_pred, \
-    KernelRecord, SampleInterval
+    SampleInterval
+from offsite.evaluation.records import KernelRecord
 from offsite.evaluation.yasksite_utils import execute_yasksite_bench_mode, execute_yasksite_ecm_mode, \
     parse_yasksite_output
 from offsite.train.train_utils import reduce_records
@@ -190,10 +191,6 @@ def compute_kernel_prediction(kernel: Kernel, machine: Machine, method: ODEMetho
     # Machine frequency used.
     frequency = machine.clock
     try:
-        # Generate pmodel code for all pmodel kernels of this kernel.
-        kernel.generate_pmodel_code(method, ivp)
-        # Initialize lists to store the kernel predictions for different numbers of cores.
-        kernel_predictions = dict()
         # If no fixed ODE system size is given, deduce the set of significant sample intervals from the pmodel kernels'
         # working sets.
         if config.args.ode_size:
@@ -201,8 +198,11 @@ def compute_kernel_prediction(kernel: Kernel, machine: Machine, method: ODEMetho
             intervals = [SampleInterval(ode_size, ode_size, ode_size)]
         else:
             intervals = kernel.deduce_relevant_samples(machine, method, ivp)
+        # Initialize lists to store the kernel predictions for different numbers of cores.
+        kernel_predictions = dict()
         # TODO check if ODE size is applicable
         for interval in intervals:
+            kernel.generate_pmodel_code(method, ivp, interval.sample)
             # Determine the ECM result for each pmodel kernel using the kerncraft tool.
             pmodel_predictions = dict()
             for pmodel in kernel.pmodel_kernels:

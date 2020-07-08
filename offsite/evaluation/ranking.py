@@ -2,28 +2,22 @@
 Definitions of ranking functions.
 """
 
-from datetime import datetime
-from getpass import getuser
 from multiprocessing import cpu_count, Pool
 from sys import maxsize as sys_maxsize
 from traceback import print_exc
 from typing import List, Tuple, Set
 
-import attr
 from pandas import DataFrame
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 
 import offsite.config
-from offsite import __version__
-from offsite.db import METADATA
-from offsite.db.db import insert, bulk_insert
-from offsite.descriptions.impl_skeleton import ImplVariant
+from offsite.descriptions.impl_variant import ImplVariant
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.math_utils import eval_math_expr, ivp_system_size, percent_deviation
-from offsite.evaluation.performance_model import ImplVariantRecord, SampleInterval
+from offsite.evaluation.performance_model import SampleInterval
+from offsite.evaluation.records import ImplVariantRecord, RankingRecord
 
 RankingData = List[Tuple[SampleInterval, Set[int]]]
 
@@ -230,178 +224,3 @@ def rank_variants(machine: Machine, method: ODEMethod, ivp: IVP, cores: int, dat
         print_exc()
         print('')
         raise e
-
-
-@attr.s
-class RankingRecord:
-    """
-    Representation of an implementation variant ranking database table record.
-
-    Attributes:
-    -----------
-    machine : int
-        Used machine.
-    compiler : int
-        Used compiler.
-    method : int
-        Used ODE method.
-    ivp : int
-        Used IVP.
-    cores: int
-        Used number of cores.
-    frequency : float
-        Used CPU frequency.
-    sample : SampleInterval
-        Used sample interval.
-    variants : Set of int
-        ID's of implementation variants.
-    db_id : int
-        ID of associated ranking database table record.
-    """
-    machine = attr.ib(type=int)
-    compiler = attr.ib(type=int)
-    method = attr.ib(type=int)
-    ivp = attr.ib(type=int)
-    cores = attr.ib(type=int)
-    frequency = attr.ib(type=float)
-    sample = attr.ib(type='SampleInterval')
-    variants = attr.ib(type=Set[int])
-    variants_serial = attr.ib(type=str, init=False)
-    first = attr.ib(type=int, init=False)
-    last = attr.ib(type=int, init=False)
-    db_id = attr.ib(type=int, init=False)
-
-    # Database information.
-    db_table = Table('ranking', METADATA,
-                     Column('db_id', Integer, primary_key=True),
-                     Column('machine', Integer, ForeignKey('machine.db_id')),
-                     Column('compiler', Integer, ForeignKey('compiler.db_id')),
-                     Column('method', Integer, ForeignKey('ode_method.db_id')),
-                     Column('ivp', Integer, ForeignKey('ivp.db_id')),
-                     Column('frequency', Float),
-                     Column('cores', Integer),
-                     Column('first', Integer),
-                     Column('last', Integer),
-                     Column('variants_serial', String),
-                     Column('updatedIn', String, default=__version__),
-                     Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
-                     Column('updatedBy', String, default=getuser(), onupdate=getuser()),
-                     UniqueConstraint('machine', 'compiler', 'method', 'ivp', 'frequency', 'cores', 'first', 'last'),
-                     sqlite_autoincrement=True)
-
-    def __attrs_post_init__(self):
-        """Create this ranking record object.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        -
-        """
-        self.first = self.sample.first
-        self.last = self.sample.last
-        self.variants_serial = ','.join(map(str, self.variants))
-
-    def to_database(self, db_session: Session):
-        """Push this ranking record object to the database.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-
-        Returns:
-        --------
-        -
-        """
-        # Attribute variants_serial.
-        self.variants_serial = ','.join(map(str, self.variants))
-        # Insert RankingRecord object.
-        insert(db_session, self)
-
-    @staticmethod
-    def update(db_session: Session, records: List['RankingRecord']):
-        """ Update data records in Ranking table with new ranking data.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-        records : list
-            Ranking data.
-
-        Returns:
-        --------
-        -
-        """
-        bulk_insert(db_session, records)
-
-    @staticmethod
-    def remove_record(db_session: Session, machine: int, compiler: int, method: int, ivp: int, frequency: float,
-                      core_counts: List[int], first: int, last: int):
-        """Remove a single ranking data record from the database.
-
-        Remove the record that matches the provided configuration of machine, compiler, ODE method, IVP, CPU frequency,
-        number of CPU cores and ODE system size.
-
-        Parameters:
-        -----------
-        db_session: sqlalchemy.orm.session.Session
-            Used database session.
-        machine: int
-            Used machine.
-        compiler: int
-            Used compiler.
-        method: int
-            Used ODE method.
-        ivp: int
-            Used IVP.
-        frequency:
-            Used CPU frequency.
-        core_counts : List of int
-            Used core counts.
-
-        Returns:
-        --------
-        -
-        """
-        db_session.query(RankingRecord).filter(
-            RankingRecord.machine.is_(machine), RankingRecord.compiler.is_(compiler), RankingRecord.method.is_(method),
-            RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency), RankingRecord.cores.in_(core_counts),
-            RankingRecord.first.is_(first), RankingRecord.last.is_(last)).delete(synchronize_session=False)
-
-    @staticmethod
-    def remove_records(db_session: Session, machine: int, compiler: int, method: int, ivp: int, frequency: float,
-                       core_counts: List[int]):
-        """Remove ranking data record(s) from the database.
-
-        Remove all records that match the provided configuration of machine, compiler, ODE method, IVP, CPU frequency
-        and number of CPU cores.
-
-        Parameters:
-        -----------
-        db_session: sqlalchemy.orm.session.Session
-            Used database session.
-        machine: int
-            Used machine.
-        compiler: int
-            Used compiler.
-        method: int
-            Used ODE method.
-        ivp: int
-            Used IVP.
-        frequency:
-            Used CPU frequency.
-        core_counts : List of int
-            Used core counts.
-
-        Returns:
-        --------
-        -
-        """
-        db_session.query(RankingRecord).filter(
-            RankingRecord.machine.is_(machine), RankingRecord.compiler.is_(compiler), RankingRecord.method.is_(method),
-            RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency),
-            RankingRecord.cores.in_(core_counts)).delete(synchronize_session=False)

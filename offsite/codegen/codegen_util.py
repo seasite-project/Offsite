@@ -10,8 +10,7 @@ from subprocess import run, PIPE, CalledProcessError
 from typing import Dict, List, Tuple
 
 import offsite.config
-from offsite.descriptions.ode_method import ODEMethod
-from offsite.evaluation.math_utils import eval_math_expr, corrector_steps, stages
+from offsite.evaluation.math_utils import eval_math_expr
 
 # Indention used for code formatting.
 INDENTION = '  '
@@ -33,7 +32,7 @@ def indent(lvl: int) -> str:
     return INDENTION * lvl
 
 
-def eval_loop_boundary(method: ODEMethod, boundary: str):
+def eval_loop_boundary(boundary: str, constants: List[Tuple[str, float]]):
     """Evaluate loop boundary expression.
 
     Parameters:
@@ -48,7 +47,6 @@ def eval_loop_boundary(method: ODEMethod, boundary: str):
     str
         Evaluated boundary expression.
     """
-    constants = [corrector_steps(method), stages(method)]
     boundary = eval_math_expr(str(boundary), constants)
     try:
         boundary = int(boundary)
@@ -90,7 +88,7 @@ def replace_incr_with_assign_op(computation: str):
     str
         Computation string with replaced operator.
     """
-    return sub(r'(\+=|\-=)', '=', computation)
+    return sub(r'(\+=|-)', '=', computation)
 
 
 def substitute_rhs_call(computation: str, component: str, constants: List[Tuple[str, str]]) -> str:
@@ -113,15 +111,18 @@ def substitute_rhs_call(computation: str, component: str, constants: List[Tuple[
     assert '%RHS' in computation
     config = offsite.config.offsiteConfig
     component = component.strip()
-    # Replace constants in component string.
-    for constant_name, constant_value in constants:
-        regex = r'(?![a-zA-Z0-9]-_)' + constant_name + r'(?![a-zA-Z0-9-_])'
-        component = sub(regex, str(eval_math_expr(constant_value, constants)), component)
     # Substitute %in keyword with the variable name defined in the given config.
     component = component.replace("%in", config.ode_solution_vector)
     # Replace index keyword %idx and %last_idx with the variable names defined in the given config.
     component = component.replace('%idx', config.var_idx)
     component = component.replace('%last_idx', config.var_last_idx)
+    # Replace constants in component string.
+    for constant_name, constant_value in constants:
+        regex = r'(?![a-zA-Z0-9]-_)' + constant_name + r'(?![a-zA-Z0-9-_])'
+        if constant_name in ['g', 'n']:
+            component = sub(regex, str(eval_math_expr(constant_value, constants, cast_to=int)), component)
+        else:
+            component = sub(regex, str(eval_math_expr(constant_value, constants)), component)
     # Substitute RHS call.
     return computation.replace('%RHS', component)
 
@@ -211,6 +212,35 @@ def write_closing_bracket(indent_lvl: int) -> str:
     return indent(indent_lvl) + '}' + '\n'
 
 
+def write_tiling_loop(block_varname: str, indent_lvl: int) -> str:
+    """Write tiling loop.
+
+    Parameters:
+    -----------
+    block_varname: str
+        Name suffix of the block size variable.
+    indent_lvl: int
+        Current indention level of the surrounding code.
+
+    Returns:
+    --------
+    list of str
+        Written tiling loop code line.
+    """
+    bs_var = 'bs_{}'.format(block_varname)
+    limit_var = 'limit_{}'.format(block_varname)
+    B_var = 'B_{}'.format(block_varname)
+    #
+    loop = indent(indent_lvl) + 'int {}, {};\n'.format(bs_var, limit_var)
+    loop += indent(indent_lvl) + 'for (int jj=first, {0}=imin({1}, last-first+1), '.format(bs_var, B_var)
+    loop += '{0}=imax(first, last+1-{1}); jj<=last; {2}=last+1-jj, {0}=last)\n'.format(limit_var, B_var, bs_var)
+    loop += indent(indent_lvl) + '{\n'
+    indent_lvl += 1
+    loop += indent(indent_lvl) + 'for (; jj <= {}; jj += {})'.format(limit_var, bs_var)
+    loop += indent(indent_lvl) + '{\n'
+    return loop
+
+
 def write_instrument_kernel_start(indent_lvl: int):
     """Write instrumentation code that would be run before kernel execution.
 
@@ -276,6 +306,24 @@ def write_instrument_kernel_end(indent_lvl: int, kernel_id: int):
     instr_end += indent(indent_lvl) + '}\n'
     instr_end += '#endif\n'
     return instr_end
+
+
+def create_variantname(variant: List['Kernel'], skeleton: str) -> str:
+    """Create filename of an implementation variant.
+
+    Parameters:
+    -----------
+    variant: list of Kernel
+        Kernels associated with this implementation variant.
+    skelelton: str
+        Name of the associated ImplSkeleton.
+
+    Returns:
+    --------
+    str
+        Created filename.
+    """
+    return '{}_{}'.format(skeleton, '_'.join((kernel.name for kernel in variant)))
 
 
 def format_codefile(path: Path):

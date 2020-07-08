@@ -2,25 +2,16 @@
 Definition of class OmpBarrierBenchmark.
 """
 
-from datetime import datetime
-from getpass import getuser
 from pathlib import Path
 from subprocess import run, PIPE, CalledProcessError
 from sys import version_info
 from typing import List
 
 import attr
-from pandas import read_sql_query
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
 
-from offsite import __version__
-from offsite.db import METADATA
-from offsite.db.db import insert
 from offsite.descriptions.machine import Machine
 from offsite.evaluation.math_utils import remove_outliers
-from offsite.evaluation.performance_model import KernelRecord
+from offsite.evaluation.records import BenchmarkRecord
 
 
 @attr.s(hash=True)
@@ -249,151 +240,3 @@ int main(int argc, char *argv[])\n\
 AVAIL_BENCHMARKS = {
     'omp_barrier': OmpBarrierBenchmark()
 }
-
-
-@attr.s
-class BenchmarkRecord:
-    """Representation of a benchmark table database record.
-
-    Attributes:
-    -----------
-    name : str
-        Name of this object.
-    machine : int
-        Used machine.
-    compiler : int
-        Used compiler.
-    data : float
-        Benchmark result.
-    frequency : float
-        Used CPU frequency.
-    cores : int
-        Used number of CPU cores.
-    db_id : int
-        ID of associated benchmark result database table record.
-    """
-    name = attr.ib(type=str)
-    machine = attr.ib(type=int)
-    compiler = attr.ib(type=int)
-    data = attr.ib(type=float)
-    frequency = attr.ib(type=float)
-    cores = attr.ib(type=int)
-    db_id = attr.ib(type=int, init=False)
-
-    # Database information.
-    db_table = Table('benchmark_result', METADATA,
-                     Column('db_id', Integer, primary_key=True),
-                     Column('name', String),
-                     Column('machine', Integer, ForeignKey('machine.db_id')),
-                     Column('compiler', Integer, ForeignKey('compiler.db_id')),
-                     Column('data', Float),
-                     Column('frequency', Float),
-                     Column('cores', Integer),
-                     Column('upadtedIn', String, default=__version__),
-                     Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
-                     Column('updatedBy', String, default=getuser(), onupdate=getuser()),
-                     sqlite_autoincrement=True)
-
-    def to_database(self, db_session: Session):
-        """Push this benchmark record object to the database.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-
-        Returns:
-        --------
-        -
-        """
-        insert(db_session, self)
-
-    @staticmethod
-    def contains(db_session: Session, machine: Machine, benchmark: 'OmpBarrierBenchmark') -> bool:
-        """
-        Check if the Benchmark table already contains data of a particular benchmark for a given configuration of
-        machine and compiler.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-        machine : Machine
-            Used Machine.
-        benchmark : Benchmark
-            Used Benchmark.
-
-        Returns:
-        --------
-        boolean
-            True if table contains fitting data False else.
-        """
-        data = db_session.query(BenchmarkRecord).filter(
-            BenchmarkRecord.name.like(benchmark.name), BenchmarkRecord.machine.is_(machine.db_id),
-            BenchmarkRecord.compiler.is_(machine.compiler.db_id)).first()
-        return bool(data)
-
-    @staticmethod
-    def update(db_session: Session, machine: Machine, benchmark: 'OmpBarrierBenchmark',
-               benchmark_records: List['BenchmarkRecord']):
-        """Update data records in Benchmark table with new benchmark data.
-
-        Parameters:
-        -----------
-        db_session : sqlalchemy.orm.session.Session
-            Used database session.
-        machine : Machine
-            Used Machine.
-        benchmark : Benchmark
-            Used Benchmark.
-        benchmark_records : list of BenchmarkRecord
-            Results of the executed benchmark as list of mathematical expression strings.
-
-        Returns:
-        --------
-        -
-        """
-        for record in benchmark_records:
-            # Select and remove all already included data records.
-            try:
-                queried_record = db_session.query(BenchmarkRecord).filter(
-                    BenchmarkRecord.name.like(benchmark.name),
-                    BenchmarkRecord.machine.is_(machine.db_id),
-                    BenchmarkRecord.compiler.is_(machine.compiler.db_id),
-                    BenchmarkRecord.frequency.is_(record.frequency),
-                    BenchmarkRecord.cores.is_(record.cores)).one()
-                # Update data record.
-                queried_record.data = (record.data + queried_record.data) / 2
-            except NoResultFound:
-                # Insert new data record.
-                record.to_database(db_session)
-            except MultipleResultsFound:
-                raise RuntimeError('Unable to update benchmark record!')
-
-    @staticmethod
-    def select(db_session: Session, machine: Machine, benchmarks: List[str]) -> List[KernelRecord]:
-        """Retrieve BenchmarkRecord table data record(s) from the database.
-
-        Return all records that match the provided configuration of machine, compiler and benchmark name(s).
-
-        Parameters:
-        -----------
-        db_session: sqlalchemy.orm.session.Session
-            Used database session.
-        machine: Machine
-            Used Machine.
-        benchmarks : Benchmark
-            Names of used benchmarks.
-
-        Returns:
-        --------
-        pandas.DataFrame
-            Retrieved list of data records.
-        """
-        query = db_session.query(BenchmarkRecord.cores, BenchmarkRecord.name, BenchmarkRecord.data,
-                                 BenchmarkRecord.frequency).filter(BenchmarkRecord.machine.is_(machine.db_id),
-                                                                   BenchmarkRecord.compiler.is_(machine.compiler.db_id),
-                                                                   BenchmarkRecord.name.in_(benchmarks)).order_by(
-            BenchmarkRecord.cores, BenchmarkRecord.name)
-        data = read_sql_query(query.statement, db_session.bind, index_col='cores')
-        return data

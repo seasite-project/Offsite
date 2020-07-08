@@ -88,6 +88,7 @@ def parse_impl_skeletons(folder: Path, templates: List[KernelTemplate], tool: Mo
     return [ImplSkeleton.from_yaml(f, templates) for f in (f for f in folder.iterdir()
                                                            if f.suffix == __impl_skeleton_ext__)]
 
+
 def parse_method(path: Path) -> ODEMethod:
     """Parse ODE method description YAML file and retun ODEMethod object.
 
@@ -122,6 +123,7 @@ def parse_methods(path: Path) -> List[ODEMethod]:
     if path.is_file():
         return [parse_method(path)]
     return [ODEMethod.from_yaml(mf) for mf in (f for f in path.iterdir() if f.suffix == __ode_method_ext__)]
+
 
 def parse_ivp(path: Path, tool: ModelToolType) -> IVP:
     """Parse IVP description YAML file and return IVP object.
