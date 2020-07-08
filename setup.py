@@ -83,24 +83,26 @@ setup(
         'argparse>=1.4.0',
         'attrs>=19.3.0',
         'datetime>=4.3',
-        'kerncraft>=0.8.4',
-        'lark-parser>=0.8.5',
-        'matplotlib>=3.2.1',
-        'numpy>=1.18.4',
+        #'graphviz>=0.14.0', -> offsite_decision_tree
+        'kerncraft>=0.8.5',
+        'lark-parser>=0.9.0',
+        #'matplotlib>=3.2.2',
+        'numpy>=1.19.0',
         'osaca>=0.3.3.dev0',
-        'pandas>=1.0.3',
+        'pandas>=1.0.5',
         'pathlib>=1.0.1',
-        'python-pcre>=0.7',
         'ruamel.yaml>=0.16.10',
-        'sqlalchemy>=1.3.16',
-        'sortedcontainers>=2.1.0',
-        'sympy>=1.5.1',
+        #'scikit-learn>=0.23.0', -> offsite_decision_tree
+        #'sklearn', -> offsite_decision_tree
+        'sqlalchemy>=1.3.18',
+        'sortedcontainers>=2.2.2',
+        'sympy>=1.6.1',
         'typing>=3.7.4.1',
     ],
     python_requires='>=3.6',
 
     package_data={
-        'offsite.codegen': ['code_dsl.lark'],
+        #'offsite.codegen': ['code_dsl.lark'],
     },
 
     entry_points={
