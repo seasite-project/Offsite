@@ -1,7 +1,7 @@
 #pragma once
 
 #define PROBLEM_NAME "Heat2D"
-#define PROBLEM_ID 4
+#define PROBLEM_ID 2
 
 static inline void
 eval_range (int first, int last, double t, const double *y, double *f)

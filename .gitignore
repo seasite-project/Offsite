@@ -4,4 +4,6 @@ dist/
 
 tmp/
 
+*.pmd
+
 *.db

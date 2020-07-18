@@ -16,5 +16,3 @@ code: |
   %COM omp_barrier
   %KERNEL Approx
   %KERNEL Update
-codegen:
-  datastructs: "Ysn_Fsn.h"

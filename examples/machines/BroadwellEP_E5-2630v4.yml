@@ -20,7 +20,7 @@ FLOPs per cycle:
   SP: {ADD: 8, FMA: 16, MUL: 8, total: 32}
 
 compiler: !!omap
-- icc: -O3 -xAVX -fno-alias -qopenmp
+- icc: -O3 -xCORE-AVX2 -fno-alias -qopenmp
 - clang: -O3 -mavx2 -D_POSIX_C_SOURCE=200809L -fopenmp
 - gcc: -Ofast -march=core-avx2 -fargument-noalias -ffast-math -D_POSIX_C_SOURCE=200809L
     -fopenmp -lm
@@ -63,7 +63,7 @@ memory hierarchy:
     misses: L2_LINES_IN_ALL:PMC[0-3]
     evicts: L2_TRANS_L2_WB:PMC[0-3]
 - level: L3
-  cache per group: {cl_size: 64, sets: 20, ways: 20, replacement_policy: LRU,
+  cache per group: {cl_size: 64, sets: 20.480, ways: 20, replacement_policy: LRU,
     write_allocate: true, write_back: true}
   cores per group: 10
   upstream throughput: [32 B/cy, half-duplex]

@@ -5,7 +5,7 @@
 #include <math.h>
 #include "RHS_Wave1D.h"
 #include "ODE_radauIIA7.h"
-#include "Y2sn_pFs.h"
+#include "DS_D.h"
 #ifdef INSTRUMENT
 #include "timesnap.h"
 #endif
@@ -79,7 +79,6 @@ timestep (const int me, const int first, const int last, double t, double h)
   for (int k = 0; k < 5; ++k)
     {
 
-      \
 #pragma omp master
       {
 	double **tmp = Yprev;
@@ -145,7 +144,6 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma omp barrier
     }
 
-  \
 #pragma omp master
   {
     double **tmp = Yprev;

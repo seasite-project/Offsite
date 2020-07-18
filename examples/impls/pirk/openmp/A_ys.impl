@@ -9,5 +9,3 @@ code: |
   %COM omp_barrier
   %KERNEL ys_Approx
   %KERNEL ys_Update
-codegen:
-  datastructs: "Ysn_Fsn.h"

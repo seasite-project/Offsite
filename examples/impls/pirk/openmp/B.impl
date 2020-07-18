@@ -9,5 +9,3 @@ code: |
   %LOOP_END k
   %COM omp_barrier
   %KERNEL ApproxUpdate
-codegen:
-  datastructs: "Ysn_Fsn.h"

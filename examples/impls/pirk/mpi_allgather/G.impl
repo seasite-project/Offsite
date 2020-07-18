@@ -18,5 +18,3 @@ code: |
   %LOOP_END k
   %KERNEL RHS_Approx
   %KERNEL Update
-codegen:
-  datastructs: "Ysn_Fsn.h"

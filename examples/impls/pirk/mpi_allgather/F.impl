@@ -5,7 +5,7 @@ code: |
   %KERNEL RHS_LC y
   %COM omp_barrier
   %LOOP_START k m-1
-    %CMD SWAP Yprev Ycur double**
+    %SWAP Yprev Ycur double**
     %KERNEL RHS_LC Yprev[i]
     %COM omp_barrier
     %LOOP_START i s
@@ -13,7 +13,5 @@ code: |
     %LOOP_END i
     %COM omp_barrier
   %LOOP_END k
-  %CMD SWAP Yprev Ycur double**
+  %SWAP Yprev Ycur double**
   %KERNEL RHS_Approx_Update Yprev[i]
-codegen:
-  datastructs: "Y2sn_pFs.h"
