@@ -1,5 +1,5 @@
 """@package code_tree
-Definitions of classes CodeNodeType, CodeNode, RootNode, LoopNode, CommunicationNode, ComputationNode, CommandNode,
+Definitions of classes CodeNodeType, CodeNode, RootNode, LoopNode, CommunicationNode, ComputationNode, SwapNode,
 KernelNode, PModelNode, CodeTree, CodeTreeGenerator.
 """
 
@@ -25,7 +25,7 @@ class CodeNodeType(Enum):
     COMMUNICATION = 'COMMUNICATION'
     KERNEL = 'KERNEL'
     PMODEL = 'PMODEL'
-    CMD = 'CMD'
+    SWAP = 'SWAP'
     ROOT = 'ROOT'
 
 
@@ -525,7 +525,7 @@ class ComputationNode(CodeNode):
     isIVPdependent = attr.ib(type=bool, default=False)  # TODO deleteable?!
 
     def __attrs_post_init__(self):
-        """Strip empty spcaces from computation during object creation.
+        """Strip empty spaces from computation during object creation.
 
         Parameters:
         -----------
@@ -618,8 +618,8 @@ class ComputationNode(CodeNode):
 
 
 @attr.s
-class CommandNode(CodeNode):
-    """Representation of a command node object.
+class SwapNode(CodeNode):
+    """Representation of a pointer swap node object.
 
     Attributes:
     -----------
@@ -635,8 +635,6 @@ class CommandNode(CodeNode):
         Parent node of this object.
     child: CodeNode
         Child node of this object.
-    cmd_type: str
-        Name of the command.
     arg1: str
         First argument of the command.
     arg2: str
@@ -644,7 +642,6 @@ class CommandNode(CodeNode):
     datatype: str
         Used datatype.
     """
-    cmd_type = attr.ib(str)
     arg1 = attr.ib(str)
     arg2 = attr.ib(str)
     datatype = attr.ib(str)
@@ -697,7 +694,7 @@ class CommandNode(CodeNode):
          str
              Written code line.
          """
-        raise NotImplementedError('Kerncraft code generation does not support command nodes!')
+        raise NotImplementedError('Kerncraft code generation does not support swap nodes!')
 
     def to_kernel_codeline(self) -> str:
         """Write node content to kernel code line.
@@ -711,7 +708,7 @@ class CommandNode(CodeNode):
          str
              Written code line.
          """
-        raise NotImplementedError('Kernel code generation does not support command nodes!')
+        raise NotImplementedError('Kernel code generation does not support swap nodes!')
 
     def to_yasksite_codeline(self) -> str:
         """Write node content to yasksite code line.
@@ -725,7 +722,7 @@ class CommandNode(CodeNode):
          str
              Written code line.
          """
-        raise NotImplementedError('Yasksite code generation does not support command nodes!')
+        raise NotImplementedError('Yasksite code generation does not support swap nodes!')
 
 
 @attr.s
@@ -1471,16 +1468,14 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def cmd_swap(self, tree: 'lark.tree.Tree'):
-        cmd_type = 'SWAP'
+    def swap(self, tree: 'lark.tree.Tree'):
         # Read tree information.
-        arg1 = str(tree.children[0])
-        arg2 = str(tree.children[1])
-        datatype = str(tree.children[2])
+        arg1 = str(tree.children[1])
+        arg2 = str(tree.children[2])
+        datatype = str(tree.children[3])
         # Create computation node.
         prev, nxt, parent, child = self.get_relatives()
-        node = CommandNode(
-            self.current_indent_lvl, CodeNodeType.CMD, prev, nxt, parent, child, cmd_type, arg1, arg2, datatype)
+        node = SwapNode(self.current_indent_lvl, CodeNodeType.SWAP, prev, nxt, parent, child, arg1, arg2, datatype)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False

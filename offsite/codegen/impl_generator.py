@@ -20,6 +20,7 @@ from offsite.descriptions.impl_skeleton import ImplSkeleton
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.kernel_template import KernelTemplate, Kernel
 from offsite.descriptions.ode_method import ODEMethod
+from offsite.descriptions.parser_utils import DatastructDict, DatastructType
 from offsite.evaluation.math_utils import eval_math_expr, corrector_steps, stages
 
 
@@ -41,6 +42,8 @@ class ImplCodeGenerator:
         Stack of loops to be unrolled.
     loaded_templates: dict (key=str, val=KernelTemplate)
         Required and already loaded kernel templates.
+    required_datastructs: DatastructDict
+        TODO
     """
     db_session = attr.ib(type='sqlalchemy.orm.session.Session')
     folder_impl = attr.ib(type=Path)
@@ -48,6 +51,7 @@ class ImplCodeGenerator:
     folder_method = attr.ib(type=Path)
     unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
     loaded_templates = attr.ib(type=Dict, default=dict())
+    required_datastructs = attr.ib(type=DatastructDict, default=DatastructDict())
 
     def collect_loop_meta_data(self, node: CodeNode):
         """Traverse tree depth first and collect all unroll tasks.
@@ -116,6 +120,7 @@ class ImplCodeGenerator:
 
         self.unroll_stack.clear()
         self.loaded_templates.clear()
+        self.required_datastructs.clear()
 
         # Create folder if it does not yet exist.
         if self.folder_impl and not self.folder_impl.exists():
@@ -166,6 +171,7 @@ class ImplCodeGenerator:
             if node.template_name not in self.loaded_templates.keys():
                 template = KernelTemplate.from_database(self.db_session, node.template_name)
                 self.loaded_templates[node.template_name] = template
+                self.required_datastructs = {**template.datastructs, **self.required_datastructs}
         # Traverse tree depth first.
         if node.child:
             self.generate_implementation_trees(node.child, skeleton, method)
@@ -306,11 +312,70 @@ class ImplCodeGenerator:
         includes += '#include "ODE_{}.h"\n'.format(method.name)
         self.write_ode_method(method)
         # Data structures.
-        if 'datastructs' in skeleton.codegen:
-            includes += '#include "{}"\n'.format(skeleton.codegen['datastructs'])
+        self.write_datastructures(skeleton.name)
+        includes += '#include "DS_{}.h"\n'.format(skeleton.name)
         # Instrumentation.
         includes += '#ifdef INSTRUMENT\n#include "timesnap.h"\n#endif\n'
         return includes + '\n'
+
+    def write_datastructures(self, skeleton: str):
+        """Write data structures to file.
+
+         Parameters:
+         -----------
+         skeleton: str
+             Name of the used implementation skeleton.
+
+         Returns:
+         --------
+         -
+         """
+        # Create folder if it does not yet exist.
+        if self.folder_impl and not self.folder_impl.exists():
+            self.folder_impl.mkdir(parents=True)
+        # Write inclusion guard first.
+        dstruct_str = '#pragma once\n\n'
+        # Write data structures.
+        ds_pointers = ''
+        ds_alloc_str = ''
+        ds_free_str = ''
+        for name, desc in self.required_datastructs.items():
+            # Skip names reserved for Butcher table entries.
+            if name in ('A', 'b', 'c'):
+                continue
+            # Skip names reserved for pre-defined variables.
+            if name in ('h', 't', 'g'):
+                continue
+            # Add to pointers.
+            ds_pointers += '{} {}{};\n'.format(desc.datatype, '*' * desc.struct_type, name)
+            # Add to alloc and free.
+            if desc.struct_type == DatastructType.array1D:
+                ds_alloc_str += '{} = alloc1d({});\n'.format(name, desc.size[0])
+                ds_free_str += 'free1d({});\n'.format(name)
+            elif desc.struct_type == DatastructType.array2D:
+                ds_alloc_str += '{} = alloc2d({}, {});\n'.format(name, desc.size[0], desc.size[1])
+                ds_free_str += 'free2d({});\n'.format(name)
+            elif desc.struct_type == DatastructType.array3D:
+                ds_alloc_str += '{} = alloc3d({}, {}, {});\n'.format(name, desc.size[0], desc.size[1], desc.size[2])
+                ds_free_str += 'free3d({});\n'.format(name)
+            else:
+                assert False
+        # Write pointers.
+        dstruct_str += ds_pointers + '\n'
+        # Write allocate function.
+        dstruct_str += 'static void allocate_data_structures() {\n'
+        dstruct_str += ds_alloc_str
+        dstruct_str += '}\n\n'
+        # Write free function.
+        dstruct_str += 'static void free_data_structures() {\n'
+        dstruct_str += ds_free_str
+        dstruct_str += '}\n\n'
+        # Write to file.
+        path = Path('{}/DS_{}.h'.format(self.folder_impl, skeleton))
+        with path.open('w') as file_handle:
+            file_handle.write(dstruct_str)
+        # Format code with indent tool if available.
+        format_codefile(path)
 
     def write_rhs_function(self, ivp: IVP):
         """Write RHS functions to file.

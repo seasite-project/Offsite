@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from offsite import __version__
 from offsite.db import METADATA
 from offsite.db.db import insert
-from offsite.descriptions.parser_utils import serialize_obj
 
 
 @attr.s
@@ -67,7 +66,7 @@ class ImplVariant:
             # Supplement attributes not saved in database.
             variant.kernels = self.kernels
             # Update serialized members.
-            variant.kernels_serial = serialize_obj(variant.kernels)
+            variant.kernels_serial = ','.join(map(str, variant.kernels))
             return variant
         # Add new object to database.
         # Attribute kernels_serial.

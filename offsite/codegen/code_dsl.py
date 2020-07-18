@@ -9,7 +9,7 @@ code_grammar = """
     ?code_line: code_keyword NEWLINE? -> code
     ?empty_line: NEWLINE
 
-    ?code_keyword: code_pragma | code_loop_start | code_loop_end | code_computation | code_communication | code_kernel | code_pmodel | code_cmd
+    ?code_keyword: code_pragma | code_loop_start | code_loop_end | code_computation | code_communication | code_kernel | code_pmodel | code_swp
 
     // Supported keywords
     code_pragma: keyword_pragma arg_word -> pragma
@@ -33,12 +33,8 @@ code_grammar = """
     code_kernel: keyword_kernel arg_word (arg_word | arg_array)? -> kernel
     ?keyword_kernel: "%KERNEL"
 
-    code_cmd: keyword_cmd -> cmd
-    //?keyword_cmd: "%CMD" cmd
-    ?keyword_cmd: "%CMD" cmd_swap
-
-    //?cmd: cmd_swap -> cmd_swap // new commands should be added here
-    ?cmd_swap: "SWAP" arg_word arg_word (arg_word | arg_pointer)
+    code_swp: keyword_swp arg_word arg_word (arg_word | arg_pointer) -> swap
+    ?keyword_swp: "%SWAP"
 
     // Keyword arguments
     ?arg_word: CNAME
