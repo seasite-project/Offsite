@@ -5,7 +5,6 @@ Main script of the offsite_impl2csv application.
 from argparse import ArgumentParser, Namespace
 from datetime import datetime
 
-from matplotlib import pyplot
 from pandas import read_sql_query, DataFrame
 
 from offsite import __version__
@@ -48,7 +47,6 @@ def parse_program_args_app_impl2csv() -> Namespace:
                         help='Range of plotted system sizes N. Used syntax: \'[first_N]:[last_N]:[incr_N]\'.')
     # Specific options to tweak appearance of plots.
     parser.add_argument('-tperComponent', action='store_true', default=False, help='')
-    parser.add_argument('--no-plot', action='store_true', default=False, help='')
 
     # Parse program arguments.
     return parser.parse_args()
@@ -143,7 +141,6 @@ def plot_impl_variant_prediction(args, db_session):
     # Split implementation prediction data by implementation variant ID.
     split_data = {idx: data.loc[idx] for idx in data.index.unique().values}
 
-    plot_legend = list()
     for impl_id, impl_data in split_data.items():
         df = DataFrame(columns=('N', 'prediction'))
 
@@ -163,24 +160,7 @@ def plot_impl_variant_prediction(args, db_session):
             df.loc[idx] = [N] + [prediction]
 
             idx += 1
-        # Plot implementation variant.
-        pyplot.plot(df['N'], df['prediction'])
-        # Save implementation variant name for legend.
-        plot_legend.append('Variant {}'.format(impl_id))
         df.to_csv('impl_{}.csv'.format(impl_id))
-    if not args.no_plot:
-        # Plot data.
-        pyplot.title('Implementation variant predictions')
-        pyplot.legend(plot_legend)
-        pyplot.xlabel('N')
-        if args.tperComponent:
-            pyplot.ylabel('time per component [s]')
-        else:
-            pyplot.ylabel('time [s]')
-        # Save plot.
-        pyplot.savefig('impl_variant_prediction_{}.png'.format(datetime.now().strftime('%Y-%m-%d_%H:%M:%S')))
-        # Show plot.
-        pyplot.show()
 
 
 def run():
