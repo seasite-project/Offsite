@@ -92,7 +92,7 @@ setup(
         'argparse>=1.4.0',
         'attrs>=19.3.0',
         'datetime>=4.3',
-        'kerncraft>=0.8.4',
+        'kerncraft==0.8.5',
         'matplotlib>=3.3.3',
         'numpy>=1.18.2',
         'osaca>=0.3.3.dev0',
