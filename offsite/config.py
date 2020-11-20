@@ -101,7 +101,7 @@ class Config:
         parser = ConfigParser()
         # Check kerncraft version.
         if version_info[1] > 6:
-            parser.read(path)
+            parser.read(str(path))
         else:
             parser.read(str(path))
         # Program arguments

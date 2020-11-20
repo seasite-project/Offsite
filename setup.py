@@ -103,7 +103,6 @@ setup(
         'sqlalchemy>=1.3.16',
         'sortedcontainers>=2.1.0',
         'sympy>=1.5.1',
-        'typing>=3.7.4.1'
     ],
     python_requires='>=3.6',
 
