@@ -71,6 +71,7 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
 
     # What does your project relate to?
@@ -92,6 +93,7 @@ setup(
         'attrs>=19.3.0',
         'datetime>=4.3',
         'kerncraft>=0.8.4',
+        'matplotlib>=3.3.3',
         'numpy>=1.18.2',
         'osaca>=0.3.3.dev0',
         'pandas>=1.0.3',
@@ -113,7 +115,8 @@ setup(
         'console_scripts': [
             'offsite_tune=offsite.offsite_tune:run',
             'offsite_bench=offsite.offsite_bench:run',
-            'offsite_codegen=offsite.offsite_codegen:run'
+            'offsite_codegen=offsite.offsite_codegen:run',
+            'offsite_impl2csv=offsite.offsite_impl2csv:run'
         ],
     }
 )
