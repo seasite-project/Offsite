@@ -142,7 +142,7 @@ def plot_impl_variant_prediction(args, db_session):
     split_data = {idx: data.loc[idx] for idx in data.index.unique().values}
 
     for impl_id, impl_data in split_data.items():
-        df = DataFrame(columns=('N', 'prediction'))
+        df = DataFrame(columns=('N', 'time', 'MLUPs'))
 
         idx = 0
         for N in range_of_N(args.N):
@@ -154,10 +154,12 @@ def plot_impl_variant_prediction(args, db_session):
             if args.tperComponent:
                 prediction: float = eval_math_expr(
                     str(row.prediction.iat[0]), [ivp_system_size(1), ('x', n)], cast_to=float)
+                mlups = float(1e-6) / float(prediction)
             else:
                 prediction: float = eval_math_expr(
                     str(row.prediction.iat[0]), [ivp_system_size(n), ('x', n)], cast_to=float)
-            df.loc[idx] = [N] + [prediction]
+                mlups = float(n * 1e-6) / float(prediction)
+            df.loc[idx] = [N] + [prediction] + [mlups]
 
             idx += 1
         df.to_csv('impl_{}.csv'.format(impl_id))
