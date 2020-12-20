@@ -1,0 +1,31 @@
+ivp_dependent: true
+datastructs:
+  - double y[n]
+  - double F[s][n]
+computations:
+  A: "F[l][j] = %RHS"
+variants:
+  - name: RHS_predictor_lj
+    code: |
+        %LOOP l s
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP A
+    pmodel :
+      - working sets: { "(s+1)*n+s", "2*n" }
+    codegen :
+        RHS: "eval_range"
+  - name: RHS_predictor_jl
+    code: |
+        %PRAGMA ivdep
+        %LOOP j n
+            %LOOP l s unroll
+                %COMP A
+    pmodel :
+      - working sets: { "(s+1)*n+s" }
+    codegen :
+        RHS: "eval_component"
+codegen:
+  RHS_input: "y"
+  RHS_butcher_nodes: "c[l]"
+model_tool: kerncraft

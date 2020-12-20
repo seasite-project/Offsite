@@ -2,55 +2,53 @@
 Definition of the code DSL used to described ImplSkeleton and KernelTemplate codes.
 """
 
-code_grammar = """
-    start: (line)+ 
+from lark import Lark, Tree
+from lark.indenter import Indenter
 
-    line: code_line | empty_line
-    ?code_line: code_keyword NEWLINE? -> code
-    ?empty_line: NEWLINE
-
-    ?code_keyword: code_pragma | code_loop_start | code_loop_end | code_computation | code_communication | code_kernel | code_pmodel | code_swp
-
+code_grammar = r"""
+    ?start: _NL* line+
+    line: _kw _NL [_INDENT line+ _DEDENT]
+    
     // Supported keywords
-    code_pragma: keyword_pragma arg_word -> pragma
-    ?keyword_pragma: "%PRAGMA"
-
-    code_loop_start: keyword_loop_start arg_word arg_expression (arg_word_or_int)* -> loop_s
-    ?keyword_loop_start: "%LOOP_START" -> kw_loop_s
-
-    code_loop_end: keyword_loop_end arg_word -> loop_e
-    ?keyword_loop_end: "%LOOP_END" -> kw_loop_e
-
-    code_computation: keyword_computation arg_word -> comp
-    ?keyword_computation: "%COMP"
-
-    code_communication: keyword_communication arg_word (arg_word | arg_array)? -> comm
-    ?keyword_communication: "%COM"
-
-    code_pmodel: keyword_pmodel -> pmodel
-    ?keyword_pmodel: "%PMODEL"
-
-    code_kernel: keyword_kernel arg_word (arg_word | arg_array)? -> kernel
-    ?keyword_kernel: "%KERNEL"
-
-    code_swp: keyword_swp arg_word arg_word (arg_word | arg_pointer) -> swap
-    ?keyword_swp: "%SWAP"
-
+    _kw: kw_pragma | kw_loop | kw_computation | kw_communication | kw_pmodel | kw_kernel | kw_swap
+    
+    kw_pragma: "%PRAGMA" arg_word -> pragma
+    kw_loop: "%LOOP" arg_word arg_expression (arg_word_or_int)* -> loop
+    kw_computation: "%COMP" arg_word -> comp
+    kw_communication: "%COM"  arg_word (arg_word | arg_array)? -> comm
+    kw_pmodel: "%PMODEL" -> pmodel
+    kw_kernel: "%KERNEL" arg_word (arg_word | arg_array)? -> kernel
+    kw_swap: "%SWAP" arg_word arg_word (arg_word | arg_pointer) -> swap
+          
     // Keyword arguments
-    ?arg_word: CNAME
-    ?arg_word_or_int: CNAME | INT
-    arg_expression: (CNAME | INT) (OPERATOR (CNAME | INT))?
-    arg_array: CNAME "[" CNAME "]"
-    ?arg_pointer: CNAME ("*")+
-
+    ?arg_word: NAME
+    ?arg_word_or_int: NAME | INT
+    ?arg_expression: (NAME | INT) (OPERATOR (NAME | INT))?
+    ?arg_array: NAME "[" NAME "]"
+    ?arg_pointer: NAME ("*")+
+    
     // Custom terminals
     OPERATOR: "-"|"+"|"*"|"/"
-
-    // Common terminals
+    _NL: /(\r?\n[\t ]*)+/
+    
+    %import common.CNAME -> NAME
     %import common.INT
-    %import common.CNAME
-    %import common.NEWLINE
-
-    // Ignore whitespaces
-    %ignore " "
+    %import common.WS_INLINE
+    
+    %declare _INDENT _DEDENT
+    %ignore WS_INLINE
 """
+
+
+class CodeIndenter(Indenter):
+    NL_type = '_NL'
+    OPEN_PAREN_types = []
+    CLOSE_PAREN_types = []
+    INDENT_type = '_INDENT'
+    DEDENT_type = '_DEDENT'
+    tab_len = 8
+
+
+def parse_lark_grammar(lark_str: str) -> Tree:
+    parser = Lark(code_grammar, parser='lalr', postlex=CodeIndenter())
+    return parser.parse(lark_str)

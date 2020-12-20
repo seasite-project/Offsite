@@ -4,7 +4,7 @@ Utility functions used for training the tuning database.
 
 from itertools import product
 from sys import maxsize as sys_maxsize
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sympy import simplify
@@ -27,7 +27,7 @@ def fuse_equal_records(records: IntervalRecordList) -> IntervalRecordList:
 
     Parameters:
     -----------
-    records : list of tuple
+    records: list of tuple
         Results for a set of SampleInterval objects.
 
     Returns:
@@ -69,12 +69,12 @@ def interpolate_border_records(records: IntervalRecordList) -> IntervalRecordLis
 
     Parameters:
     -----------
-    records : list of tuple
+    records: list of tuple
         Results for a set of SampleInterval objects.
 
     Returns:
     --------
-    list of tuple :
+    list of tuple
         Reduced set of the input SampleInterval objects.
     """
     if len(records) <= 1:
@@ -103,6 +103,9 @@ def interpolate_border_records(records: IntervalRecordList) -> IntervalRecordLis
                 polynomial = interpolate_polynomial(x_coords, y_coords, 2)
                 # Multiply with system size 'n' again.
                 polynomial = '({}) * n'.format(polynomial)
+                # Replace variable 'x' used in polynomial with 'n'.
+                polynomial = polynomial.replace('x', 'n')
+                # Create interval.
                 interval = SampleInterval(x_coords[0] + 1, x_coords[-1] - 1, region=SamplePosition.BORDER)
                 # Save interpolated border region interval.
                 interpolated.append((interval, polynomial))
@@ -124,7 +127,7 @@ def reduce_records(records: IntervalRecordList) -> IntervalRecordList:
 
     Parameters:
     -----------
-    records : list of tuple
+    records: list of tuple
         Results for a set of SampleInterval objects.
 
     Returns:
@@ -143,7 +146,7 @@ def reduce_records(records: IntervalRecordList) -> IntervalRecordList:
 
 def fetch_and_sort_kernel_runtime_prediction_data(
         db_session: Session, machine: int, compiler: int, method: int, ivp: int, cores: int, frequency: float,
-        mode: str, ode_size: int = None) -> Dict[int, KernelRecord]:
+        mode: str, ode_size: Optional[int] = None) -> Dict[int, KernelRecord]:
     """
     Fetch all kernel runtime prediction data records available in the database that match the given configuration of
     machine, frequency, cores, compiler, ODE method and IVP.
@@ -154,23 +157,23 @@ def fetch_and_sort_kernel_runtime_prediction_data(
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : int
+    machine: int
         Used machine.
-    compiler : int
+    compiler: int
         Used compiler.
-    method : int
+    method: int
         Used ODE method.
-    ivp : int
+    ivp: int
         Used IVP.
-    cores : int
+    cores: int
         Cores per NUMA domain of the used machine.
-    frequency : float
+    frequency: float
         Clock frequency of the used machine.
-    mode : str
+    mode: str
         Application mode used to obtain data.
-    ode_size : int
+    ode_size: int
         Used fixed ODE system size.
 
     Returns:
@@ -202,9 +205,9 @@ def deduce_available_impl_variants(db_session: Session, skeleton: ImplSkeleton,
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    skeleton : ImplSkeleton
+    skeleton: ImplSkeleton
         Used ImplSkeleton object.
 
     Returns:
@@ -256,7 +259,7 @@ def deduce_impl_variant_sample_intervals(
 
     Parameters:
     -----------
-    data : dict of list of KernelRecord
+    data: dict of list of KernelRecord
         Kernel runtime prediction data.
 
     Returns:
@@ -305,6 +308,8 @@ def deduce_impl_variant_sample_intervals(
             if len(pdata) > 1 and pdata[0][0] > pdata[0][1]:
                 pdata.pop(0)
     # Add interval with 'inf' end.
+    end = max(end, 1)
+    #
     impl_var_data[SampleInterval(end, sys_maxsize)] = dict()
     for kernel in pred_data:
         impl_var_data[SampleInterval(end, sys_maxsize)][kernel] = (pred_data[kernel][0][2], pred_data[kernel][0][3])

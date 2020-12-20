@@ -1,18 +1,16 @@
 code: |
-  %COM omp_barrier
-  %COM mpi_allgather y
-  %COM omp_barrier
-  %KERNEL RHS y
-  %LOOP_START k m
     %COM omp_barrier
-    %KERNEL LC
+    %COM mpi_allgather y
     %COM omp_barrier
-    %LOOP_START i s
-      %COM mpi_allgather Y[i]
-    %LOOP_END i
+    %KERNEL RHS_predictor
+    %LOOP k m
+        %COM omp_barrier
+        %KERNEL LC
+        %COM omp_barrier
+        %LOOP i s
+            %COM mpi_allgather Y[i]
+        %COM omp_barrier
+        %KERNEL RHS
     %COM omp_barrier
-    %KERNEL RHS
-  %LOOP_END k
-  %COM omp_barrier
-  %KERNEL Approx
-  %KERNEL Update
+    %KERNEL Approx
+    %KERNEL Update

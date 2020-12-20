@@ -7,7 +7,7 @@ computations:
 variants:
   - name: ys_Update_j
     code: |
-      %COMP A
+        %COMP A
     pmodel :
       - working sets: { "2*n" }
 model_tool: yasksite

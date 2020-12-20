@@ -2,9 +2,11 @@
 Main script of the offsite_tune autotuning application.
 """
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from time import time
+
+from sqlalchemy.orm import Session
 
 import offsite.config
 from offsite import __version__
@@ -13,14 +15,12 @@ from offsite.config import ModelToolType, ProgramModeType, IncoreToolType, __ben
 from offsite.db.db import commit, close, open_db
 from offsite.db.db_mapping import mapping
 from offsite.descriptions.parser import parse_verify_yaml_desc, print_yaml_desc
-from offsite.evaluation.ranking import rank
 from offsite.train.train_communication import train_communication_costs
 from offsite.train.train_impl import train_impl_variant_predictions
 from offsite.train.train_kernel import train_kernel_predictions, train_kernel_runtimes
-from offsite.train.train_kernel_blocksize import train_kernel_blocksizes
 
 
-def parse_program_args_app_tune() -> 'argparse.Namespace':
+def parse_program_args_app_tune() -> Namespace:
     """Parse the passed program arguments.
 
     Parameters:
@@ -75,10 +75,6 @@ def parse_program_args_app_tune() -> 'argparse.Namespace':
     # Configuration options.
     parser.add_argument('--config', action='store', type=Path,
                         help='Customize autotuning process by passing a configuration ({}) file'.format(__config_ext__))
-    parser.add_argument('--tolerance', action='store', default=5.0, type=float,
-                        help='Set tolerance that controls how far implementation variants may deviate from the best '
-                             'found implementation variant in order to be incorporated during the ranking phase. '
-                             'Default: 5.0')
     parser.add_argument('--ws-interpolate', action='store_true', default=False,
                         help='Interpolate prediction/runtime of the sample interval created in particular border '
                              'regions.')
@@ -103,13 +99,13 @@ def tune():
     --------
     -
     """
-    args = offsite.config.offsiteConfig.args
-    verbose = args.verbose
+    args: Namespace = offsite.config.offsiteConfig.args
+    verbose: bool = args.verbose
     # Start timer.
     if verbose:
         start_time = time()
     # Open database.
-    db_session = open_db(args.db)
+    db_session: Session = open_db(args.db)
     # Parser phase.
     print('#' * 80 + '\n\nParser phase...\n')
     if verbose:
@@ -127,18 +123,6 @@ def tune():
     train_communication_costs(db_session, machine, skeletons)
     if verbose:
         print(' done.')
-    # Train database with kernel block size predictions.
-    if args.tool == ModelToolType.KERNCRAFT or args.tool is None:
-        if verbose:
-            print('  * Kernel block sizes...', end='', flush=True)
-            start_time_block = time()
-        templates = train_kernel_blocksizes(db_session, machine, templates, methods, ivps)
-        templates = [template.to_database(db_session) for template in templates]
-        if verbose:
-            print(' done.')
-            stop_time_block = time()
-            print('#' * 80 + '\n')
-            print('Kernel block size phase took {} seconds.'.format(round(stop_time_block - start_time_block, 3)))
     # Train database with kernel runtime predictions.
     if verbose:
         print('  * Kernel predictions...', end='', flush=True)
@@ -169,15 +153,15 @@ def tune():
         print('#' * 80 + '\n')
         print('Impl prediction phase took {} seconds.'.format(round(stop_time_impl - start_time_impl, 3)))
     # Ranking phase.
-    print('#' * 80 + '\n\nRanking phase...\n')
-    if verbose:
-        start_time_ranking = time()
-    rank(db_session, machine, methods, ivps)
-    if verbose:
-        print(' done.\n')
-        stop_time_ranking = time()
-        print('#' * 80 + '\n')
-        print('Ranking phase took {} seconds.'.format(round(stop_time_ranking - start_time_ranking, 3)))
+    # print('#' * 80 + '\n\nRanking phase...\n')
+    # if verbose:
+    #    start_time_ranking = time()
+    # rank(db_session, machine, methods, ivps)
+    # if verbose:
+    #    print(' done.\n')
+    #    stop_time_ranking = time()
+    #    print('#' * 80 + '\n')
+    #    print('Ranking phase took {} seconds.'.format(round(stop_time_ranking - start_time_ranking, 3)))
     # Commit to database.
     commit(db_session)
     # Close database.
@@ -203,7 +187,7 @@ def run():
     # Map database classes.
     mapping()
     # Parse the program arguments.
-    args = parse_program_args_app_tune()
+    args: Namespace = parse_program_args_app_tune()
     # Create custom or default configuration.
     init_config(args)
     # Tune application.

@@ -2,7 +2,7 @@
 Main script of the offsite_bench application.
 """
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
 import offsite.config
@@ -12,7 +12,7 @@ from offsite.descriptions.machine import Machine
 from offsite.evaluation.benchmark import OmpBarrierBenchmark
 
 
-def parse_program_args_app_bench() -> 'argparse.Namespace':
+def parse_program_args_app_bench() -> Namespace:
     """
     Parse the available program arguments of the offsite_bench application.
 
@@ -32,7 +32,7 @@ def parse_program_args_app_bench() -> 'argparse.Namespace':
                         help='Print program version and exit.')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print further information on this run.')
     parser.add_argument('--benchmark', action='store', required=True, type=BenchType,
-                        help='Name of the benchmark executed.')
+                        help='Name of the benchmark executed.\nAvailable benchmarks:\n * omp_barrier')
     parser.add_argument('--machine', action='store', required=True, type=Path,
                         help='Path to YAML machine description (.yaml) file.')
     parser.add_argument('--compiler', action='store', required=True, help='Name of the compiler.')
@@ -43,16 +43,16 @@ def parse_program_args_app_bench() -> 'argparse.Namespace':
     return parser.parse_args()
 
 
-def write_benchmark_file(bench: BenchType, data, machine: 'Machine'):
+def write_benchmark_file(bench: BenchType, data, machine: Machine):
     """Write benchmark results to file.
 
     Parameters:
     -----------
-    bench : BenchType
+    bench: BenchType
         Executed benchmark.
     data:
         Obtained benchmark results.
-    machine:
+    machine: Machine
         Machine used to run the benchmark.
 
     Returns:
@@ -91,7 +91,7 @@ def run_benchmark():
     config = offsite.config.offsiteConfig
     # Parse passed machine file.
     machine = Machine.from_yaml(config.args.machine, config.args.compiler)
-    # TODO Pin CPU frequency / check if pinned
+    # Run benchmark.
     if config.args.benchmark == BenchType.OMP_BARRIER:
         # Run benchmark.
         bench = OmpBarrierBenchmark()

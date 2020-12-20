@@ -1,4 +1,4 @@
-benchmark: OMP_BARRIER
+benchmark: omp_barrier
 machine: SkylakeSP_Gold-6148
 compiler: icc 19.0.2.187
 flags: -O3 -xAVX -fno-alias -qopenmp

@@ -4,13 +4,17 @@ Definition of class KerncraftCodeGenerator.
 
 from copy import deepcopy
 from re import sub
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import attr
 from sortedcontainers import SortedDict
 
-from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, LoopNode, RootNode
-from offsite.codegen.codegen_util import eval_loop_boundary, write_closing_bracket  # , write_kerncraft_tiling_loop
+import offsite.config
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, ComputationNode, LoopNode, RootNode
+from offsite.codegen.codegen_util import eval_loop_boundary, write_closing_bracket
+from offsite.descriptions.ivp import IVP
+from offsite.descriptions.ode_method import ODEMethod
+from offsite.descriptions.parser_utils import DatastructDict
 from offsite.evaluation.math_utils import corrector_steps, stages, ivp_grid_size, ivp_system_size, eval_math_expr
 
 
@@ -31,7 +35,7 @@ class KerncraftCodeGenerator:
     """
     loop_stack = attr.ib(type=List[Tuple[str, LoopNode]], default=list())
     unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
-
+    pmodel_trees = attr.ib(type=List[CodeNode], default=list())
     switch_to_nxt_pmodel = attr.ib(type=bool, default=False, init=False)
 
     def collect_loop_meta_data(self, node: CodeNode):
@@ -47,6 +51,7 @@ class KerncraftCodeGenerator:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             if node.optimize_unroll is not None:
                 self.unroll_stack[node.optimize_unroll] = node
         # Traverse tree depth first.
@@ -67,14 +72,18 @@ class KerncraftCodeGenerator:
         --------
         -
         """
+        self.unroll_counter = dict()
         while True:
             self.unroll_stack.clear()
             self.collect_loop_meta_data(tree)
             if len(self.unroll_stack.keys()) == 0:
                 break
-            CodeTree.unroll_loop(self.unroll_stack.values()[0])
+            loop = self.unroll_stack.values()[0]
+            CodeTree.unroll_loop(loop)
+            self.unroll_counter[loop.var] = loop.start
 
-    def generate(self, kernel: 'Kernel', method: 'ODEMethod', ivp: 'IVP', system_size: int = None) -> Dict[str, str]:
+    def generate(
+            self, kernel: 'Kernel', method: ODEMethod, ivp: IVP, system_size: Optional[int] = None) -> Dict[str, str]:
         """Generate pmodel code for a particular Kernel object.
 
         Parameters:
@@ -94,11 +103,12 @@ class KerncraftCodeGenerator:
             Generated pmodel codes.
         """
         # Set some members to match current code generation.
-        code_tree = deepcopy(kernel.code_tree).root
+        code_tree: CodeNode = deepcopy(kernel.code_tree).root
         self.pmodel_trees = [code_tree]
 
         self.unroll_stack.clear()
-        self.loop_stack = []
+        self.unroll_counter = dict()
+        self.loop_stack = list()
 
         # Generate pmodel code trees.
         self.generate_pmodel_trees(code_tree, kernel.template, method, ivp, system_size)
@@ -112,35 +122,42 @@ class KerncraftCodeGenerator:
         for tree in self.pmodel_trees:
             CodeTree.substitute_butcher_coefficients(tree, method, True)
         # Update pmodel kernel names.
-        idx = 1
+        idx: int = 1
         for tree in self.pmodel_trees:
             tree.name = kernel.name + ('_{}'.format(idx) if len(self.pmodel_trees) > 1 else '')
             idx += 1
         # Generate code from tree and write to string.
-        codes = dict()
+        codes: Dict[str, str] = dict()
         for tree in self.pmodel_trees:
             if kernel.template.isIVPdependent:
-                ivp_constants = ivp.constants.as_tuple()
+                config = offsite.config.offsiteConfig
+                # Determine RHS input variable.
+                rhs_input: str = kernel.template.codegen[
+                    'RHS_input'] if 'RHS_input' in kernel.template.codegen else config.ode_solution_vector
+                # Determine IVP constants.
+                ivp_constants: Optional[List[Tuple[str, Union[str, float, int]]]] = ivp.constants.as_tuple()
                 if system_size is not None:
                     ivp_constants.extend(
                         [ivp_grid_size(eval_math_expr(ivp.gridSize, [ivp_system_size(system_size)], cast_to=int)),
                          ivp_system_size(system_size)])
                 # Generate code for each RHS component.
-                idx = 1
+                idx: int = 1
                 for rhs in ivp.components.values():
-                    code_name = tree.name + '_{}'.format(ivp.name) + (
+                    code_name: str = tree.name + '_{}'.format(ivp.name) + (
                         '_{}'.format(idx) if len(ivp.components.keys()) > 1 else '')
-                    codes[code_name] = self.generate_kerncraft_code(tree, rhs.code, ivp_constants)
+                    # Deepcopy required to assure that unroll counter is reset for each IVP component.
+                    codes[code_name] = self.generate_kerncraft_code(
+                        tree, rhs.code, rhs_input, ivp_constants, deepcopy(self.unroll_counter))
                     idx += 1
             else:
                 codes[tree.name] = self.generate_kerncraft_code(tree)
         # Prepend variable definitions to written code.
-        var_defs = self.construct_variable_defs(kernel.template.datastructs)
+        var_defs: str = self.construct_variable_defs(kernel.template.datastructs)
         codes = {name: var_defs + code for name, code in codes.items()}
         return codes
 
     @staticmethod
-    def construct_variable_defs(datastructs: 'DatastructDict') -> str:
+    def construct_variable_defs(datastructs: DatastructDict) -> str:
         """Construct variable definitions of a particular kernel.
 
         Parameters:
@@ -153,13 +170,13 @@ class KerncraftCodeGenerator:
         str
             Variable definitions string.
         """
-        var_defs = ''
+        var_defs: str = ''
         for name, desc in datastructs.items():
             var_defs += '{} {}{};\n'.format(desc.datatype, name, desc.dimensions_to_string())
         return var_defs + '\n'
 
-    def generate_pmodel_trees(
-            self, node: CodeNode, template: 'KernelTemplate', method: 'ODEMethod', ivp: 'IVP', system_size: int = None):
+    def generate_pmodel_trees(self, node: CodeNode, template: 'KernelTemplate', method: ODEMethod, ivp: IVP,
+                              system_size: Optional[int] = None):
         """Generate pmodel code trees.
 
         Parameters:
@@ -185,7 +202,7 @@ class KerncraftCodeGenerator:
             node.prev.next = None
             node.prev = None
             # Prepend current loop stack.
-            root = node
+            root: CodeNode = node
             if self.loop_stack:
                 root = node
                 for loop_node in reversed(self.loop_stack):
@@ -194,24 +211,25 @@ class KerncraftCodeGenerator:
                     root.parent.set_relatives(None, None, None, root)
                     root = root.parent
             # Add new root node.
-            new_root = RootNode(0, CodeNodeType.ROOT, None, None, None, root)
+            new_root = RootNode(0, CodeNodeType.ROOT, None, None, None, root, '')
             root.parent = new_root
             #
             self.pmodel_trees.append(new_root)
             self.switch_to_nxt_pmodel = False
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            constants = [corrector_steps(method), stages(method)]
+            constants: Optional[List[Tuple[str, Union[str, float, int]]]] = [corrector_steps(method), stages(method)]
             if ivp is not None and system_size is not None:
                 constants.extend([ivp_grid_size(ivp.gridSize), ivp_system_size(system_size)])
             node.boundary = eval_loop_boundary(node.boundary, constants)
             #
             self.loop_stack.append(deepcopy(node))
         elif node.type == CodeNodeType.COMPUTATION:
+            node: ComputationNode
             # Substitute computation.
             node.computation = template.computations[node.computation].computation
             # Replace constants.
-            constants = [corrector_steps(method), stages(method)]
+            constants: Optional[List[Tuple[str, Union[str, float, int]]]] = [corrector_steps(method), stages(method)]
             for constant in constants:
                 node.computation = sub(r'\b{}\b'.format(constant[0]), str(constant[1]), node.computation)
             # Check if computation includes RHS calls.
@@ -234,8 +252,9 @@ class KerncraftCodeGenerator:
             self.generate_pmodel_trees(node.next, template, method, ivp, system_size)
 
     @staticmethod
-    def generate_kerncraft_code(
-            node: CodeNode, rhs: str = None, ivp_constants: List[Tuple[str, str]] = None, code: str = ''):
+    def generate_kerncraft_code(node: CodeNode, rhs: str = None, rhs_input: str = None,
+                                ivp_constants: Optional[List[Tuple[str, Union[str, float, int]]]] = None,
+                                unroll_counter: Optional[Dict[str, str]] = None, code: str = ''):
         """Write kerncraft code.
 
         Parameters:
@@ -246,8 +265,12 @@ class KerncraftCodeGenerator:
             Used ODE system size.
         rhs: str
             IVP component to replace RHS calls.
+        rhs_input: str
+            Input vector used in RHS calls.
         ivp_constants: list of Tuple (str, str)
             Constants of the IVP.
+        unroll_counter: dict (key=str, val=str)
+            Index counter for each of the unrolled loops.
         code: str
             Current code string.
 
@@ -257,16 +280,29 @@ class KerncraftCodeGenerator:
             Generated kerncraft code.
         """
         if node.type == CodeNodeType.COMPUTATION and node.isIVPdependent:
+            node: ComputationNode
             assert rhs is not None
+            assert rhs_input is not None
             assert ivp_constants is not None
-            code += node.to_kerncraft_codeline(rhs, ivp_constants)
+            assert unroll_counter is not None
+            # Update RHS input to match unrolled loop indices.
+            cur_rhs_input = rhs_input
+            for var, counter in unroll_counter.items():
+                # Update loop's unroll counter.
+                if '[{}]'.format(var) in rhs_input:
+                    cur_rhs_input = rhs_input.replace('[{}]'.format(var), '[{}]'.format(counter))
+                    unroll_counter[var] = str(eval_math_expr(counter + '+ 1', cast_to=int))
+            # Generate code.
+            code += node.to_kerncraft_codeline(rhs, cur_rhs_input, ivp_constants)
         elif node.type != CodeNodeType.ROOT:
             code += node.to_kerncraft_codeline()
         # Traverse tree depth first.
         if node.child:
-            code += KerncraftCodeGenerator.generate_kerncraft_code(node.child, rhs, ivp_constants)
+            code += KerncraftCodeGenerator.generate_kerncraft_code(
+                node.child, rhs, rhs_input, ivp_constants, unroll_counter)
         if node.type == CodeNodeType.LOOP:
             code += write_closing_bracket(node.indent)
         if node.next:
-            code += KerncraftCodeGenerator.generate_kerncraft_code(node.next, rhs, ivp_constants)
+            code += KerncraftCodeGenerator.generate_kerncraft_code(
+                node.next, rhs, rhs_input, ivp_constants, unroll_counter)
         return code

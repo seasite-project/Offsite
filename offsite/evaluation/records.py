@@ -1,22 +1,26 @@
 """@package records
-Performance modeling functions.
+Definitions of classes BenchmarkRecord, ImplVariantRecord, KernelRecord and RankingRecord.
 """
 
 from datetime import datetime
 from getpass import getuser
 from sys import maxsize as sys_maxsize
-from typing import List, Tuple, Set
+from typing import List, Optional, Tuple, Set
 
 import attr
-from pandas import read_sql_query
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table, UniqueConstraint
-from sqlalchemy.orm import Session
+from pandas import read_sql_query, DataFrame
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Table, UniqueConstraint
+from sqlalchemy.orm import Query, Session
 from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
+from sympy import simplify
 
 from offsite import __version__
+from offsite.config import RankingCriteriaType, RankingCutoffType
 from offsite.db import METADATA
 from offsite.db.db import insert, bulk_insert
 from offsite.descriptions.impl_variant import ImplVariant
+from offsite.descriptions.machine import Machine
+from offsite.descriptions.ranking_task import RankTask
 from offsite.evaluation.performance_model import SampleInterval
 
 
@@ -26,19 +30,19 @@ class BenchmarkRecord:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    machine : int
+    machine: int
         Used machine.
-    compiler : int
+    compiler: int
         Used compiler.
-    data : float
+    data: float
         Benchmark result.
-    frequency : float
+    frequency: float
         Used CPU frequency.
-    cores : int
+    cores: int
         Used number of CPU cores.
-    db_id : int
+    db_id: int
         ID of associated benchmark result database table record.
     """
     name = attr.ib(type=str)
@@ -58,7 +62,7 @@ class BenchmarkRecord:
                      Column('data', Float),
                      Column('frequency', Float),
                      Column('cores', Integer),
-                     Column('upadtedIn', String, default=__version__),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      sqlite_autoincrement=True)
@@ -68,7 +72,7 @@ class BenchmarkRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -78,18 +82,18 @@ class BenchmarkRecord:
         insert(db_session, self)
 
     @staticmethod
-    def contains(db_session: Session, machine: 'Machine', benchmark: 'OmpBarrierBenchmark') -> bool:
+    def contains(db_session: Session, machine: Machine, benchmark: 'OmpBarrierBenchmark') -> bool:
         """
         Check if the Benchmark table already contains data of a particular benchmark for a given configuration of
         machine and compiler.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine : Machine
+        machine: Machine
             Used Machine.
-        benchmark : Benchmark
+        benchmark: Benchmark
             Used Benchmark.
 
         Returns:
@@ -97,25 +101,24 @@ class BenchmarkRecord:
         boolean
             True if table contains fitting data False else.
         """
-        data = db_session.query(BenchmarkRecord).filter(
+        return bool(db_session.query(BenchmarkRecord).filter(
             BenchmarkRecord.name.like(benchmark.name), BenchmarkRecord.machine.is_(machine.db_id),
-            BenchmarkRecord.compiler.is_(machine.compiler.db_id)).first()
-        return bool(data)
+            BenchmarkRecord.compiler.is_(machine.compiler.db_id)).first())
 
     @staticmethod
-    def update(db_session: Session, machine: 'Machine', benchmark: 'OmpBarrierBenchmark',
+    def update(db_session: Session, machine: Machine, benchmark: 'OmpBarrierBenchmark',
                benchmark_records: List['BenchmarkRecord']):
         """Update data records in Benchmark table with new benchmark data.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine : Machine
+        machine: Machine
             Used Machine.
-        benchmark : Benchmark
+        benchmark: Benchmark
             Used Benchmark.
-        benchmark_records : list of BenchmarkRecord
+        benchmark_records: list of BenchmarkRecord
             Results of the executed benchmark as list of mathematical expression strings.
 
         Returns:
@@ -125,7 +128,7 @@ class BenchmarkRecord:
         for record in benchmark_records:
             # Select and remove all already included data records.
             try:
-                queried_record = db_session.query(BenchmarkRecord).filter(
+                queried_record: BenchmarkRecord = db_session.query(BenchmarkRecord).filter(
                     BenchmarkRecord.name.like(benchmark.name),
                     BenchmarkRecord.machine.is_(machine.db_id),
                     BenchmarkRecord.compiler.is_(machine.compiler.db_id),
@@ -140,7 +143,7 @@ class BenchmarkRecord:
                 raise RuntimeError('Unable to update benchmark record!')
 
     @staticmethod
-    def select(db_session: Session, machine: 'Machine', benchmarks: List[str]) -> List['KernelRecord']:
+    def select(db_session: Session, machine: Machine, benchmarks: List[str]) -> DataFrame:
         """Retrieve BenchmarkRecord table data record(s) from the database.
 
         Return all records that match the provided configuration of machine, compiler and benchmark name(s).
@@ -151,7 +154,7 @@ class BenchmarkRecord:
             Used database session.
         machine: Machine
             Used Machine.
-        benchmarks : Benchmark
+        benchmarks: Benchmark
             Names of used benchmarks.
 
         Returns:
@@ -159,13 +162,11 @@ class BenchmarkRecord:
         pandas.DataFrame
             Retrieved list of data records.
         """
-        query = db_session.query(BenchmarkRecord.cores, BenchmarkRecord.name, BenchmarkRecord.data,
-                                 BenchmarkRecord.frequency).filter(BenchmarkRecord.machine.is_(machine.db_id),
-                                                                   BenchmarkRecord.compiler.is_(machine.compiler.db_id),
-                                                                   BenchmarkRecord.name.in_(benchmarks)).order_by(
-            BenchmarkRecord.cores, BenchmarkRecord.name)
-        data = read_sql_query(query.statement, db_session.bind, index_col='cores')
-        return data
+        query: Query = db_session.query(BenchmarkRecord.cores, BenchmarkRecord.name, BenchmarkRecord.data,
+                                        BenchmarkRecord.frequency).filter(
+            BenchmarkRecord.machine.is_(machine.db_id), BenchmarkRecord.compiler.is_(machine.compiler.db_id),
+            BenchmarkRecord.name.in_(benchmarks)).order_by(BenchmarkRecord.cores, BenchmarkRecord.name)
+        return read_sql_query(query.statement, db_session.bind, index_col='cores')
 
 
 @attr.s
@@ -174,27 +175,27 @@ class ImplVariantRecord:
 
     Attributes:
     -----------
-    impl : int
+    impl: int
         Used implementation variant.
-    machine : int
+    machine: int
         Used machine.
-    compiler : int
+    compiler: int
         Used compiler.
-    method : int
+    method: int
         Used ODE method.
-    ivp : int
+    ivp: int
         Used IVP.
     cores: int
         Used number of cores.
-    first : int
+    first: int
         Start of sample interval.
-    last : int
+    last: int
         End of sample interval.
-    prediction : str
+    prediction: str
         Implementation variant's runtime prediction.
-    mode : str
+    mode: str
         Prediction obtained in RUN or MODEL mode.
-    db_id : int
+    db_id: int
         ID of associated implementation variant prediction database table
         record.
     """
@@ -205,7 +206,7 @@ class ImplVariantRecord:
     ivp = attr.ib(type=int)
     cores = attr.ib(type=int)
     frequency = attr.ib(type=float)
-    sample = attr.ib(type='SampleInterval')
+    sample = attr.ib(type=SampleInterval)
     first = attr.ib(type=int, init=False)
     last = attr.ib(type=int, init=False)
     prediction = attr.ib(type=str)
@@ -250,7 +251,7 @@ class ImplVariantRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -263,32 +264,31 @@ class ImplVariantRecord:
         insert(db_session, self)
 
     @staticmethod
-    def contains(db_session: Session, impl: 'ImplVariant', machine: int, compiler: int, method: int, ivp: int,
-                 cores: int, frequency: float,
-                 mode: str) -> bool:
+    def contains(db_session: Session, impl: ImplVariant, machine: int, compiler: int, method: int, ivp: int, cores: int,
+                 frequency: float, mode: str) -> bool:
         """
         Check if the ImplVariantRecord table already contains data of a particular implementation variant for a given
         configuration of machine, compiler, ODE method, IVP CPU frequency, and number of CPU cores.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impl : ImplVariant
+        impl: ImplVariant
             Used implementation variant.
-        machine : int
+        machine: int
             Used machine.
-        compiler : int
+        compiler: int
             Used compiler.
-        method : int
+        method: int
             Used ODE method.
-        ivp : int
+        ivp: int
             Used IVP.
-        cores : int
+        cores: int
             Number of cores.
-        frequency : float
+        frequency: float
             Used CPU frequency.
-        mode : str
+        mode: str
             Application mode used to obtain data.
 
         Returns:
@@ -296,12 +296,11 @@ class ImplVariantRecord:
         boolean
             True if table contains fitting data False else.
         """
-        data = db_session.query(ImplVariantRecord).filter(
+        return bool(db_session.query(ImplVariantRecord).filter(
             ImplVariantRecord.impl.is_(impl.db_id), ImplVariantRecord.machine.is_(machine),
             ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
             ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.cores.is_(cores),
-            ImplVariantRecord.frequency.is_(frequency), ImplVariantRecord.mode.is_(mode)).all()
-        return bool(data)
+            ImplVariantRecord.frequency.is_(frequency), ImplVariantRecord.mode.is_(mode)).all())
 
     @staticmethod
     def update(db_session: Session, records: List['ImplVariantRecord']):
@@ -309,11 +308,11 @@ class ImplVariantRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impl_variant_records : list
+        impl_variant_records: list
             Impl variant prediction records.
-        mode : str
+        mode: str
             Application mode used to obtain data.
 
         Returns:
@@ -334,7 +333,7 @@ class ImplVariantRecord:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impl : List of int
+        impl: List of int
             Used implementation variant IDs.
         machine: int
             Used machine.
@@ -344,9 +343,9 @@ class ImplVariantRecord:
             Used ODE method.
         ivp: int
             Used IVP.
-        frequency:
+        frequency: float
             Used CPU frequency.
-        core_counts : List of int
+        core_counts: List of int
             Used core counts.
 
         Returns:
@@ -362,7 +361,7 @@ class ImplVariantRecord:
 
     @staticmethod
     def select(db_session: Session, impls: List[int], machine: int, compiler: int, method: int, ivp: int,
-               frequency: float, cores: int) -> 'pandas.DataFrame':
+               frequency: float, cores: int, ode_size: int) -> DataFrame:
         """Retrieve implementation variant data record(s) from the database.
 
         Return all records that match the provided configuration of machine, compiler, ODE method, IVP, CPU frequency,
@@ -372,7 +371,7 @@ class ImplVariantRecord:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impls : List of int
+        impls: List of int
             Used implementation variant IDs.
         machine: int
             Used machine.
@@ -382,25 +381,71 @@ class ImplVariantRecord:
             Used ODE method.
         ivp: int
             Used IVP.
-        frequency:
+        frequency: float
             Used CPU frequency.
-        cores : int
+        cores: int
             Used number of cores.
+        ode_size: int
+            Used ODE system size.
 
         Returns:
         --------
         pandas.DataFrame
             Retrieved implementation variant data records.
         """
-        query = db_session.query(
-            ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last, ImplVariantRecord.prediction). \
-            filter(ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
-                   ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
-                   ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
-                   ImplVariantRecord.cores.is_(cores)). \
-            order_by(ImplVariantRecord.impl)
-        data = read_sql_query(query.statement, db_session.bind, index_col='impl')
-        return data
+        query: Query
+        if ode_size:
+            query = db_session.query(ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
+                                     ImplVariantRecord.prediction).filter(
+                ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
+                ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
+                ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
+                ImplVariantRecord.cores.is_(cores), ImplVariantRecord.first.is_(ode_size),
+                ImplVariantRecord.last.is_(ode_size)).order_by(ImplVariantRecord.impl)
+        else:
+            query = db_session.query(ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
+                                     ImplVariantRecord.prediction).filter(
+                ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
+                ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
+                ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
+                ImplVariantRecord.cores.is_(cores)).order_by(ImplVariantRecord.impl)
+        return read_sql_query(query.statement, db_session.bind, index_col='impl')
+
+    @staticmethod
+    def fuse_equal_records(records: List['ImplVariantRecord']) -> List['ImplVariantRecord']:
+        """
+        Reduce total number of records by combining adjacent intervals. Adjacent intervals can be combined if they give
+        the same result (e.g prediction, ...).
+
+        Parameters:
+        -----------
+        records: list of ImplVariantRecord
+            Results for a set of SampleInterval objects.
+
+        Returns:
+        --------
+        List of ImplVariantRecord
+            Reduced set of the input ImplVariantRecord objects.
+        """
+        if len(records) <= 1:
+            return records
+        fused_records: List[ImplVariantRecord] = list()
+        # Fuse neighbouring intervals that give the same prediction.
+        cur: Optional[ImplVariantRecord] = None
+        for record in records:
+            # Test if both intervals have the same prediction.
+            if cur is not None and cur.impl == record.impl and simplify(cur.prediction) == simplify(record.prediction):
+                # Increase upper bound of current interval.
+                cur.last = record.last
+            else:
+                # Save interval.
+                if cur is not None:
+                    fused_records.append(cur)
+                # Update current record, result and impl.
+                cur = record
+        # Save final interval.
+        fused_records.append(cur)
+        return fused_records
 
 
 @attr.s
@@ -409,29 +454,29 @@ class KernelRecord:
 
     Attributes:
     -----------
-    kernel : int
+    kernel: int
         Used kernel.
-    machine : int
+    machine: int
         Used machine.
-    compiler : int
+    compiler: int
         Used compiler.
-    method : int
+    method: int
         Used ODE method.
-    ivp : int
+    ivp: int
         Used IVP.
-    frequency : float
+    frequency: float
         Used CPU frequency.
-    cores : int
+    cores: int
         Used number of CPU cores.
-    sample : SampleInterval
+    sample: SampleInterval
         Used sample interval.
-    prediction : float
+    prediction: float
         Kernel runtime prediction.
-    mode : str
+    mode: str
         Prediction obtained in RUN or MODEL mode.
-    weight : float
+    weight: float
         TODO
-    db_id : int
+    db_id: int
         ID of associated kernel prediction database table record.
     """
     kernel = attr.ib(type=int)
@@ -441,7 +486,7 @@ class KernelRecord:
     ivp = attr.ib(type=int)
     frequency = attr.ib(type=float)
     cores = attr.ib(type=int)
-    sample = attr.ib(type='SampleInterval')
+    sample = attr.ib(type=SampleInterval)
     prediction = attr.ib(type=str)
     mode = attr.ib(type=str)
     weight = attr.ib(type=float, init=False, default=1.0)
@@ -488,7 +533,7 @@ class KernelRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -507,25 +552,25 @@ class KernelRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine : int
+        machine: int
             Used machine.
-        compiler : int
+        compiler: int
             Used compiler.
-        method : int
+        method: int
             Used ODE method.
-        ivp : int
+        ivp: int
             Used IVP.
-        cores : int
+        cores: int
             Used CPU cores.
-        frequency : float
+        frequency: float
             Used CPU frequency.
-        interval : SampleInterval
+        interval: SampleInterval
             Used sample interval.
-        records : list of tuple (SampleInterval, kernel prediction)
+        records: list of tuple (SampleInterval, kernel prediction)
             Kernel prediction data.
-        mode : str
+        mode: str
             Application mode used to obtain data.
 
         Returns:
@@ -533,11 +578,11 @@ class KernelRecord:
         -
         """
         for record in records:
-            interval = record[0]
-            prediction = record[1]
+            interval: SampleInterval = record[0]
+            prediction: str = record[1]
             # Select and update all already included data records.
             try:
-                queried_record = db_session.query(KernelRecord).filter(
+                queried_record: KernelRecord = db_session.query(KernelRecord).filter(
                     KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine),
                     KernelRecord.compiler.is_(compiler), KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp),
                     KernelRecord.cores.is_(cores), KernelRecord.frequency.is_(frequency),
@@ -571,21 +616,21 @@ class KernelRecord:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine : int
+        machine: int
             Used machine.
-        compiler : int
+        compiler: int
             Used compiler.
-        method : int
+        method: int
             Used ODE method.
-        ivp : int
+        ivp: int
             Used IVP.
-        cores : int
+        cores: int
             Used number of cores.
         frequency: float
             Used CPU frequency.
-        mode : str
+        mode: str
             Application mode used to obtain data.
-        ode_size : int
+        ode_size: int
             Used fixed ODE system size.
 
         Returns:
@@ -593,6 +638,7 @@ class KernelRecord:
         list of KernelRecord
             Retrieved list of data records.
         """
+        data: List[KernelRecord]
         # Required ivp.db_id = -1 to include all none IVP-dependent kernels.
         if not ode_size:
             data = db_session.query(KernelRecord).filter(
@@ -615,25 +661,25 @@ class KernelRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        kernel : int
+        kernel: int
             Used kernel.
-        machine : int
+        machine: int
             Used machine.
-        compiler : int
+        compiler: int
             Used compiler.
-        method : int
+        method: int
             Used ODE method.
-        ivp : int
+        ivp: int
             Used IVP.
-        frequency : float
+        frequency: float
             Used CPU frequency.
-        max_cores : int
+        max_cores: int
             Maximum number of cores. Check for core counts up to this value.
-        mode : str
+        mode: str
             Application mode used to obtain data.
-        ode_size : int
+        ode_size: int
             Used ODE size or None.
 
         Returns:
@@ -680,28 +726,27 @@ class KernelRecord:
 
 @attr.s
 class RankingRecord:
-    """
-    Representation of an implementation variant ranking database table record.
+    """Representation of an implementation variant ranking database table record.
 
     Attributes:
     -----------
-    machine : int
+    machine: int
         Used machine.
-    compiler : int
+    compiler: int
         Used compiler.
-    method : int
+    method: int
         Used ODE method.
-    ivp : int
+    ivp: int
         Used IVP.
     cores: int
         Used number of cores.
-    frequency : float
+    frequency: float
         Used CPU frequency.
-    sample : SampleInterval
+    sample: SampleInterval
         Used sample interval.
-    variants : Set of int
+    variants: Set of int
         ID's of implementation variants.
-    db_id : int
+    db_id: int
         ID of associated ranking database table record.
     """
     machine = attr.ib(type=int)
@@ -710,8 +755,11 @@ class RankingRecord:
     ivp = attr.ib(type=int)
     cores = attr.ib(type=int)
     frequency = attr.ib(type=float)
-    sample = attr.ib(type='SampleInterval')
+    sample = attr.ib(type=SampleInterval)
     variants = attr.ib(type=Set[int])
+    rankCriteria = attr.ib(type=RankingCriteriaType)
+    cutoffCriteria = attr.ib(type=RankingCutoffType)
+    cutoffValue = attr.ib(type=float)
     variants_serial = attr.ib(type=str, init=False)
     first = attr.ib(type=int, init=False)
     last = attr.ib(type=int, init=False)
@@ -729,10 +777,14 @@ class RankingRecord:
                      Column('first', Integer),
                      Column('last', Integer),
                      Column('variants_serial', String),
+                     Column('rankCriteria', Enum(RankingCriteriaType)),
+                     Column('cutoffCriteria', Enum(RankingCutoffType)),
+                     Column('cutoffValue', Float),
                      Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
-                     UniqueConstraint('machine', 'compiler', 'method', 'ivp', 'frequency', 'cores', 'first', 'last'),
+                     UniqueConstraint('machine', 'compiler', 'method', 'ivp', 'frequency', 'cores', 'first', 'last',
+                                      'rankCriteria', 'cutoffCriteria', 'cutoffValue'),
                      sqlite_autoincrement=True)
 
     def __attrs_post_init__(self):
@@ -755,7 +807,7 @@ class RankingRecord:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -786,7 +838,8 @@ class RankingRecord:
 
     @staticmethod
     def remove_record(db_session: Session, machine: int, compiler: int, method: int, ivp: int, frequency: float,
-                      core_counts: List[int], first: int, last: int):
+                      core_counts: List[int], first: int, last: int, rank_criteria: RankingCriteriaType,
+                      cutoff_criteria: RankingCutoffType, cutoff_value: float):
         """Remove a single ranking data record from the database.
 
         Remove the record that matches the provided configuration of machine, compiler, ODE method, IVP, CPU frequency,
@@ -804,10 +857,16 @@ class RankingRecord:
             Used ODE method.
         ivp: int
             Used IVP.
-        frequency:
+        frequency: float
             Used CPU frequency.
-        core_counts : List of int
+        core_counts: List of int
             Used core counts.
+        rank_criteria: RankingCriteriaType
+            Used ranking criteria.
+        cutoff_criteria: CutoffCriteriaType
+            Used cutoff criteria.
+        cutoff_value: float
+            Used cutoff value.
 
         Returns:
         --------
@@ -816,11 +875,14 @@ class RankingRecord:
         db_session.query(RankingRecord).filter(
             RankingRecord.machine.is_(machine), RankingRecord.compiler.is_(compiler), RankingRecord.method.is_(method),
             RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency), RankingRecord.cores.in_(core_counts),
-            RankingRecord.first.is_(first), RankingRecord.last.is_(last)).delete(synchronize_session=False)
+            RankingRecord.first.is_(first), RankingRecord.last.is_(last), RankingRecord.rankCriteria.is_(rank_criteria),
+            RankingRecord.cutoffCriteria.is_(cutoff_criteria),
+            RankingRecord.cutoffValue.is_(cutoff_value)).delete(synchronize_session=False)
 
     @staticmethod
     def remove_records(db_session: Session, machine: int, compiler: int, method: int, ivp: int, frequency: float,
-                       core_counts: List[int]):
+                       core_counts: List[int], rank_criteria: RankingCriteriaType, cutoff_criteria: RankingCutoffType,
+                       cutoff_value: float):
         """Remove ranking data record(s) from the database.
 
         Remove all records that match the provided configuration of machine, compiler, ODE method, IVP, CPU frequency
@@ -838,10 +900,16 @@ class RankingRecord:
             Used ODE method.
         ivp: int
             Used IVP.
-        frequency:
+        frequency: float
             Used CPU frequency.
         core_counts : List of int
             Used core counts.
+        rank_criteria: RankingCriteriaType
+            Used ranking criteria.
+        cutoff_criteria: CutoffCriteriaType
+            Used cutoff criteria.
+        cutoff_value: float
+            Used cutoff value.
 
         Returns:
         --------
@@ -849,5 +917,51 @@ class RankingRecord:
         """
         db_session.query(RankingRecord).filter(
             RankingRecord.machine.is_(machine), RankingRecord.compiler.is_(compiler), RankingRecord.method.is_(method),
-            RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency),
-            RankingRecord.cores.in_(core_counts)).delete(synchronize_session=False)
+            RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency), RankingRecord.cores.in_(core_counts),
+            RankingRecord.rankCriteria.is_(rank_criteria), RankingRecord.cutoffCriteria.is_(cutoff_criteria),
+            RankingRecord.cutoffValue.is_(cutoff_value)).delete(synchronize_session=False)
+
+    @staticmethod
+    def select(
+            db_session: Session, machine: Machine, method: int, ivp: int, task: RankTask, ode_size: int) -> DataFrame:
+        """Retrieve RankingRecord table data record(s) from the database.
+
+        Return all records that match the provided configuration of machine, compiler and benchmark name(s).
+
+        Parameters:
+        -----------
+        db_session: sqlalchemy.orm.session.Session
+            Used database session.
+        machine: Machine
+            Used Machine.
+        method: int
+            Database ID used ODE method.
+        ivp: int
+            Database ID used IVP.
+        task: RankTask
+            Used ranking task.
+        ode_size: int
+            Used ODE system size.
+
+        Returns:
+        --------
+        pandas.DataFrame
+            Retrieved list of data records.
+        """
+        query: Query
+        if ode_size:
+            query = db_session.query(RankingRecord.variants_serial).filter(
+                RankingRecord.machine.is_(machine.db_id), RankingRecord.compiler.is_(machine.compiler.db_id),
+                RankingRecord.method.is_(method), RankingRecord.ivp.is_(ivp),
+                RankingRecord.frequency.is_(machine.clock), RankingRecord.first.is_(ode_size),
+                RankingRecord.last.is_(ode_size), RankingRecord.rankCriteria.is_(task.type),
+                RankingRecord.cutoffCriteria.is_(task.cutoff_criteria),
+                RankingRecord.cutoffValue.is_(task.cutoff_value)).distinct()
+        else:
+            query = db_session.query(RankingRecord.variants_serial).filter(
+                RankingRecord.machine.is_(machine.db_id), RankingRecord.compiler.is_(machine.compiler.db_id),
+                RankingRecord.method.is_(method), RankingRecord.ivp.is_(ivp),
+                RankingRecord.frequency.is_(machine.clock), RankingRecord.rankCriteria.is_(task.type),
+                RankingRecord.cutoffCriteria.is_(task.cutoff_criteria),
+                RankingRecord.cutoffValue.is_(task.cutoff_value)).distinct()
+        return read_sql_query(query.statement, db_session.bind)

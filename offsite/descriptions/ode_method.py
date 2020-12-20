@@ -5,7 +5,6 @@ Definition of class ODEMethod.
 from datetime import datetime
 from getpass import getuser
 from pathlib import Path
-from typing import List
 
 import attr
 from sqlalchemy import Column, DateTime, Integer, String, Table
@@ -26,21 +25,21 @@ class ODEMethod:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    stages : int
+    stages: int
         Number of stages of the ODE method.
-    order_ : int
+    order_: int
         Order of the ODE method.
-    correctorSteps : int
+    correctorSteps: int
         Number of corrector steps of the ODE method.
-    coefficientsA : list of list of str
+    coefficientsA: list of list of str
         Coefficient matrix A of the ODE method.
-    coefficientsB : list of str
+    coefficientsB: list of str
         Coefficient vector b of the ODE method.
     coefficientsC: list of str
         Coefficient vector c of the ODE method.
-    db_id : int
+    db_id: int
         ID of associated ODEMethod database table record.
     """
     name = attr.ib(type=str)
@@ -50,9 +49,9 @@ class ODEMethod:
     coefficientsA = attr.ib(type=str)
     coefficientsB = attr.ib(type=str)
     coefficientsC = attr.ib(type=str)
-    coefficientsA_serial = attr.ib(type=List[str])
-    coefficientsB_serial = attr.ib(type=List[str])
-    coefficientsC_serial = attr.ib(type=List[str])
+    coefficientsA_serial = attr.ib(type=str)
+    coefficientsB_serial = attr.ib(type=str)
+    coefficientsC_serial = attr.ib(type=str)
     db_id = attr.ib(type=int, init=False)
 
     # Database information.
@@ -71,12 +70,12 @@ class ODEMethod:
                      sqlite_autoincrement=True)
 
     @classmethod
-    def from_yaml(cls, yaml_path: str) -> 'ODEMethod':
+    def from_yaml(cls, yaml_path: Path) -> 'ODEMethod':
         """Construct ODEMethod object from YAML definition.
 
         Parameters:
         -----------
-        yaml_path : str
+        yaml_path: Path
             Relative path to this object's YAML file.
 
         Returns:
@@ -119,9 +118,9 @@ class ODEMethod:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        ode_method_name : str
+        ode_method_name: str
             Name of the ODE method, which is used as primary key in the database.
 
         Returns:
@@ -130,7 +129,7 @@ class ODEMethod:
             Created ODEMethod object.
         """
         try:
-            method = db_session.query(ODEMethod).filter(ODEMethod.name.like(ode_method_name)).one()
+            method: ODEMethod = db_session.query(ODEMethod).filter(ODEMethod.name.like(ode_method_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load ODEMethod object from database!')
         except MultipleResultsFound:
@@ -145,12 +144,12 @@ class ODEMethod:
         method.coefficientsC = method.coefficientsC_serial.split(',')
         return method
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'ODEMethod':
         """Push this ODEMethod object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -159,7 +158,7 @@ class ODEMethod:
             Instance of this object connected to database session.
         """
         # Check if database already contains the compiler object.
-        method = db_session.query(ODEMethod).filter(ODEMethod.name.like(self.name)).one_or_none()
+        method: ODEMethod = db_session.query(ODEMethod).filter(ODEMethod.name.like(self.name)).one_or_none()
         if method:
             # Supplement attributes not saved in database.
             method.coefficientsA = self.coefficientsA
@@ -171,14 +170,14 @@ class ODEMethod:
         return self
 
     @staticmethod
-    def database_id(db_session: Session, yaml_path: str) -> int:
+    def database_id(db_session: Session, yaml_path: Path) -> int:
         """Return database ID of an ODE method object given by its YAML description.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        yaml_path : str
+        yaml_path: Path
             Relative path to this object's YAML file.
 
         Returns:

@@ -1,4 +1,4 @@
-benchmark: OMP_BARRIER
+benchmark: omp_barrier
 machine: Zen_ROME-7452
 compiler: icc 19.0.2.187
 flags: -O3 -xHost -fno-alias -qopenmp

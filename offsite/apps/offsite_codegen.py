@@ -2,7 +2,7 @@
 Main script of the offsite_codegen application.
 """
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from enum import Enum
 from pathlib import Path
 
@@ -18,7 +18,10 @@ from offsite.descriptions.impl_skeleton import ImplSkeleton
 from offsite.descriptions.impl_variant import ImplVariant
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.ode_method import ODEMethod
-from offsite.descriptions.parser import parse_impl_skeletons, parse_ivp, parse_kernel_templates, parse_method
+from offsite.descriptions.parser import parse_impl_skeletons, parse_ivp, parse_kernel_templates, parse_method, \
+    parse_machine, parse_ranking_tasks
+from offsite.evaluation.ranking import create_rankings
+from offsite.evaluation.records import RankingRecord
 from offsite.train.train_impl import deduce_available_impl_variants
 
 
@@ -52,6 +55,7 @@ def create_args_parser_app_codegen() -> ArgumentParser:
     # Available options.
     parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__version__),
                         help='Print program version and exit.')
+    parser.add_argument('--verbose', action='store_true', default=False, help='Print further information on this run.')
     parser.add_argument('--folder', action='store', default='tmp/variants', type=Path,
                         help='Path to the location of the generated code files.')
     parser.add_argument('--folder_impl', action='store', default=None, type=Path,
@@ -74,7 +78,7 @@ def create_args_parser_app_codegen() -> ArgumentParser:
     return parser
 
 
-def parse_program_args_app_codegen_db() -> 'argparse.Namespace':
+def parse_program_args_app_codegen_db() -> Namespace:
     """Parse the available program arguments of the offsite_codegen application for use-case data from database.
 
     Parameters:
@@ -93,13 +97,37 @@ def parse_program_args_app_codegen_db() -> 'argparse.Namespace':
                         help='Name of the IVP for which specialized code is generated for.')
     parser.add_argument('--method', action='store', required=True, type=str,
                         help='Name of the ODE method for which specialized code is generated for.')
-    parser.add_argument('--variants', action='store', required=True, type=str,
-                        help='Comma-seperated list of variants whose code will be generated.')
+    parser.add_argument('--variants', action='store', type=str, default=None,
+                        help='Comma-separated list of variants whose code will be generated.')
+    parser.add_argument('--rank', action='store', type=str, default=None,
+                        help='TODO')
+    #
+    parser.add_argument('--machine', action='store', type=Path, default=None,
+                        help='Path to YAML machine description (.yaml) file. Required and used only by argument --rank')
+    parser.add_argument('--compiler', action='store', required=False, default=None,
+                        help='Name of the compiler. Required and used only by argument --rank')
+    parser.add_argument('-n', '--ode-size', action='store', type=int, default=False,
+                        help='Tune for a fixed ODE system size only. If argument is not passed the working set model '
+                             'is applied to determine the set of tested ODE system sizes. Optional argument that would '
+                             'only be required and used by argument --rank')
     # Parse program arguments.
     return parser.parse_args()
 
 
-def parse_program_args_app_codegen_yaml() -> 'argparse.Namespace':
+def verify_program_args_app_codegen_db():
+    config = offsite.config.offsiteConfig
+    if config.args.variants is None and config.args.rank is None:
+        raise RuntimeError('Missing program argument. Either --variant or --rank are required!')
+    if config.args.variants is not None and config.args.rank is not None:
+        raise RuntimeError('Ambiguous variant selection argument. Must either use --variant or --rank but not both!')
+    if config.args.rank is not None:
+        if config.args.machine is None:
+            raise RuntimeError('Missing program argument --machine required by --rank!')
+        if config.args.compiler is None:
+            raise RuntimeError('Missing program argument --compiler required by --rank!')
+
+
+def parse_program_args_app_codegen_yaml() -> Namespace:
     """Parse the available program arguments of the offsite_codegen application for use-case data from YAML.
 
     Parameters:
@@ -149,10 +177,59 @@ def run_code_generation_db():
                 ivp.name, ivp.modelTool.value, ModelToolType.KERNCRAFT.value))
     # Retrieve ODE method from database.
     method = ODEMethod.from_database(db_session, config.args.method)
+    # Retrieve implementation variant IDs.
+    if config.args.variants is not None:
+        variant_ids = list()
+        for vid in config.args.variants.split(','):
+            # Parse ID ranges given by 'first:last'.
+            if ':' in vid:
+                vid_split = vid.split(':')
+                if len(vid_split) != 2:
+                    raise RuntimeError('Failed to parse implementation variant ID range \'{}\'! '.format(vid) +
+                                       'Supported syntax \'[first]:[last]\'')
+                first = int(vid_split[0])
+                last = int(vid_split[1])
+                variant_ids.extend([x for x in range(first, last + 1)])
+            else:
+                variant_ids.append(int(vid))
+        # Remove duplicate IDs.
+        variant_ids = list(set(variant_ids))
+        # Sort variant IDS.
+        variant_ids = sorted(variant_ids)
+    elif config.args.rank is not None:
+        task = parse_ranking_tasks(config.args.rank)
+        print(task)
+        if len(task) == 0:
+            raise RuntimeError('Codegen failed: no valid rank task specified in \'{}\'!'.format(config.args.rank))
+        if len(task) != 1:
+            raise RuntimeError('Codegen failed: using multiple rank tasks in one run is not supported!')
+        task = task[0]
+        # Parse machine and compiler information.
+        machine = parse_machine(config.args.machine, config.args.compiler)
+        machine = machine.to_database(db_session)
+        # Select ranking data from database.
+        df_ranking = RankingRecord.select(db_session, machine, method.db_id, ivp.db_id, task, config.args.ode_size)
+        # No fitting data found in database. Create required ranking and select again.
+        if len(df_ranking) == 0:
+            # Create ranking.
+            create_rankings(db_session, machine, [method], [ivp], [task])
+            # Save new ranking in database.
+            commit(db_session)
+            # Select ranking data from database.
+            df_ranking = RankingRecord.select(db_session, machine, method.db_id, ivp.db_id, task, config.args.ode_size)
+            if len(df_ranking) == 0:
+                raise RuntimeError('Unable to select the required ranking data from database.')
+        # Returned ranking data entries might contain multiple implementation variant IDs (as comma-separated string).
+        # For further processing, we require the set of unique IDs. Thus, we need to split these strings here.
+        variant_ids = set()
+        for entry in df_ranking.variants_serial.unique().tolist():
+            entries = (int(x) for x in entry.split(','))
+            variant_ids.update(entries)
+        variant_ids = sorted(variant_ids)
+    else:
+        assert False
     # Retrieve implementation variants from database.
     skeletons = dict()
-    # Retrieve implementation variant IDs.
-    variant_ids = config.args.variants.split(',')
     for variant in ImplVariant.select(db_session, variant_ids):
         sid = variant.skeleton
         if sid in skeletons:
@@ -252,9 +329,10 @@ def run_db():
     # Map database.
     mapping()
     # Create parser and parse arguments.
-    args = parse_program_args_app_codegen_db()
+    args: Namespace = parse_program_args_app_codegen_db()
     # Create custom or default configuration.
     init_config(args)
+    verify_program_args_app_codegen_db()
     # Run code generator.
     run_code_generation_db()
 
@@ -275,7 +353,7 @@ def run_yaml():
     # Map database.
     mapping()
     # Create parser and parse arguments.
-    args = parse_program_args_app_codegen_yaml()
+    args: Namespace = parse_program_args_app_codegen_yaml()
     # Create custom or default configuration.
     init_config(args)
     # Run code generator.

@@ -1,10 +1,5 @@
 ivp_dependent: true
 datastructs:
-  - double h
-  - double t
-  - double g
-  - double c[s]
-  - double y[n]
   - double Y[s][n]
   - double F[s][n]
 computations:
@@ -12,26 +7,22 @@ computations:
 variants:
   - name: RHS_lj
     code: |
-      %LOOP_START l s
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %COMP A
-      %LOOP_END j
-      %LOOP_END l
+        %LOOP l s
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP A
     pmodel :
-      - working sets: { "2*s*n+s", "(s+1)*n+s", "2*n" }
+      - working sets: { "2*s*n+s", "2*n" }
     codegen :
         RHS: "eval_range"
   - name: RHS_jl
     code: |
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %LOOP_START l s unroll
-      %COMP A
-      %LOOP_END l
-      %LOOP_END j
+        %PRAGMA ivdep
+        %LOOP j n
+            %LOOP l s unroll
+                %COMP A
     pmodel :
-      - working sets: { "2*s*n+s", "(s+1)*n+s" }
+      - working sets: { "2*s*n+s" }
     codegen :
         RHS: "eval_component"
 codegen:

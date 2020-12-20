@@ -3,7 +3,7 @@
 # FIXME
 # FIXME 16B/cy bidirectional transfers between L2 and L3 are not (yet) supported by kerncraft
 # FIXME performance counters might be wrong. This will only affect the Benchmark model
-# FIXME bandwidth measurements need validataion
+# FIXME bandwidth measurements need validation
 # FIXME
 kerncraft version: 0.8.3.dev0
 model name: Intel(R) Xeon(R) Platinum 8174 CPU @ 3.10GHz

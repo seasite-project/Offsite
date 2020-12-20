@@ -24,11 +24,11 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : Machine
+    machine: Machine
         Used machine.
-    skeletons : list of ImplSkeleton
+    skeletons: list of ImplSkeleton
         Used ImplSkeleton objects.
 
     Returns:
@@ -43,7 +43,7 @@ def train_communication_costs(db_session: Session, machine: Machine, skeletons: 
             if operation == 'mpi_allgather':
                 continue
                 # TODO add for full mpi support
-            elif operation == 'mpi_transfer':
+            elif operation == 'mpi_communicate':
                 continue
                 # TODO add for full mpi support
             elif operation not in AVAIL_BENCHMARKS:

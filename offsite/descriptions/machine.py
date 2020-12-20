@@ -6,8 +6,7 @@ from ctypes import sizeof, c_double
 from datetime import datetime
 from getpass import getuser
 from pathlib import Path
-from subprocess import PIPE, run
-from sys import version_info
+from subprocess import PIPE, run, CalledProcessError
 from typing import Dict
 
 import attr
@@ -18,6 +17,7 @@ from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
+from offsite.config import Config
 from offsite.config import IncoreToolType
 from offsite.db import METADATA
 from offsite.db.db import insert
@@ -32,13 +32,13 @@ class Compiler:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of the compiler.
-    version : str
+    version: str
         Used version of the compiler.
-    flags : str
+    flags: str
         Used compiler flags.
-    db_id : int
+    db_id: int
         ID of associated Compiler database table record.
     """
     name = attr.ib(type=str)
@@ -64,9 +64,9 @@ class Compiler:
 
         Parameters:
         -----------
-        yaml : dict
+        yaml: dict
             YAML object describing this object.
-        used_compiler : str
+        used_compiler: str
             Name of used compiler.
         Returns:
         --------
@@ -91,9 +91,9 @@ class Compiler:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        compiler_id : int
+        compiler_id: int
             Database ID of the requested Compiler object.
 
         Returns:
@@ -102,19 +102,19 @@ class Compiler:
             Created Compiler object.
         """
         try:
-            compiler = db_session.query(Compiler).filter(Compiler.db_id.is_(compiler_id)).one()
+            compiler: Compiler = db_session.query(Compiler).filter(Compiler.db_id.is_(compiler_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load Compiler object from database!')
         except MultipleResultsFound:
             raise RuntimeError('Unable to load Compiler object from database!')
         return compiler
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'Compiler':
         """Push this Machine object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -123,8 +123,9 @@ class Compiler:
             Instance of this object connected to database session.
         """
         # Check if database already contains the compiler object.
-        compiler = db_session.query(Compiler).filter(Compiler.name.like(self.name), Compiler.version.like(self.version),
-                                                     Compiler.flags.like(self.flags)).one_or_none()
+        compiler: Compiler = db_session.query(Compiler).filter(Compiler.name.like(self.name),
+                                                               Compiler.version.like(self.version),
+                                                               Compiler.flags.like(self.flags)).one_or_none()
         if compiler:
             return compiler
         # Add new object to database.
@@ -137,7 +138,7 @@ class Compiler:
 
         Parameters:
         -----------
-        compiler : str
+        compiler: str
             Used compiler command.
 
         Returns:
@@ -145,10 +146,7 @@ class Compiler:
         str
             Version string of the used compiler.
         """
-        if version_info[1] > 5:
-            version = run([compiler, '-dumpversion'], check=True, encoding='utf-8', stdout=PIPE).stdout
-        else:
-            version = run([compiler, '-dumpversion'], check=True, stdout=PIPE).stdout.decode("utf-8")
+        version = run([compiler, '-dumpversion'], check=True, encoding='utf-8', stdout=PIPE).stdout
         # Strip trailing EOL characters.
         return version.rstrip()
 
@@ -162,9 +160,9 @@ class Machine:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    db_id : int
+    db_id: int
         ID of associated Machine database table record.
     """
     name = attr.ib(type=str)
@@ -221,21 +219,21 @@ class Machine:
                      sqlite_autoincrement=True)
 
     @classmethod
-    def from_yaml(cls, yaml_path: str, used_compiler: str) -> 'Machine':
+    def from_yaml(cls, yaml_path: Path, used_compiler: str) -> 'Machine':
         """Construct Machine object from YAML definition.
 
         Parameters:
         -----------
-        yaml_path : str
+        yaml_path: Path
             Relative path to this object's YAML file.
-        used_compiler : str
+        used_compiler: str
             Name of used compiler.
         Returns:
         --------
         Machine
             Created Machine object.
         """
-        config = offsite.config.offsiteConfig
+        config: Config = offsite.config.offsiteConfig
         # Load YAML data.
         path = Path(yaml_path)
         yaml = load_yaml(path)
@@ -342,11 +340,11 @@ class Machine:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine_id : int
+        machine_id: int
             Database ID of the requested Machine object.
-        compiler_id : int
+        compiler_id: int
             Database ID of the associated Compiler object.
 
         Returns:
@@ -355,7 +353,7 @@ class Machine:
             Created Machine object.
         """
         try:
-            machine = db_session.query(Machine).filter(Machine.db_id.is_(machine_id)).one()
+            machine: Machine = db_session.query(Machine).filter(Machine.db_id.is_(machine_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load Machine object from database!')
         except MultipleResultsFound:
@@ -372,7 +370,7 @@ class Machine:
         machine.compiler = Compiler.from_database(db_session, compiler_id)
         return machine
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'Machine':
         """Push this Machine object to the database.
 
         Parameters:
@@ -386,7 +384,7 @@ class Machine:
             Instance of this object connected to database session.
         """
         # Check if database already contains the machine object.
-        machine = db_session.query(Machine).filter(Machine.name.like(self.name)).one_or_none()
+        machine: Machine = db_session.query(Machine).filter(Machine.name.like(self.name)).one_or_none()
         if machine:
             # Supplement attributes not saved in database.
             machine.path = self.path
@@ -412,9 +410,9 @@ class Machine:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        machine_id : int
+        machine_id: int
             ID of the requested Machine object.
-        compiler_id : int
+        compiler_id: int
             ID of the requested Compiler object.
 
         Returns:

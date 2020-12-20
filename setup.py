@@ -81,36 +81,38 @@ setup(
 
     install_requires=[
         'argparse>=1.4.0',
-        'attrs>=19.3.0',
+        'attrs>=20.3.0',
         'datetime>=4.3',
-        #'graphviz>=0.14.0', -> offsite_decision_tree
-        'kerncraft>=0.8.5',
-        'lark-parser>=0.9.0',
-        #'matplotlib>=3.2.2',
-        'numpy>=1.19.0',
-        'osaca>=0.3.3.dev0',
-        'pandas>=1.0.5',
+        # 'graphviz>=0.14.0', -> offsite_decision_tree
+        'kerncraft==0.8.5',
+        'lark-parser>=0.11.1',
+        'matplotlib>=3.3.3',
+        'numpy>=1.19.4',
+        'osaca>=0.3.14',
+        'pandas>=1.1.5',
         'pathlib>=1.0.1',
-        'ruamel.yaml>=0.16.10',
-        #'scikit-learn>=0.23.0', -> offsite_decision_tree
-        #'sklearn', -> offsite_decision_tree
-        'sqlalchemy>=1.3.18',
+        'ruamel.yaml>=0.16.12',
+        # 'scikit-learn>=0.23.0', -> offsite_decision_tree
+        # 'sklearn', -> offsite_decision_tree
+        'sqlalchemy>=1.3.22',
         'sortedcontainers>=2.2.2',
-        'sympy>=1.6.1',
-        'typing>=3.7.4.1',
+        'sympy>=1.7.1',
     ],
     python_requires='>=3.6',
 
-    package_data={
-        #'offsite.codegen': ['code_dsl.lark'],
-    },
-
     entry_points={
         'console_scripts': [
-            'offsite_tune=offsite.apps.offsite_tune:run',
+            # Offsite tuning.
             'offsite_bench=offsite.apps.offsite_bench:run',
+            'offsite_tune=offsite.apps.offsite_tune:run',
+            'offsite_rank=offsite.apps.offsite_rank:run',
+            # Code generator.
             'offsite_codegen=offsite.apps.offsite_codegen:run_db',
             'offsite_codegen_from_yaml=offsite.apps.offsite_codegen:run_yaml',
+            # Auxiliary apps.
+            'offsite_db2name=offsite.apps.auxiliary.offsite_db2name:run',
+            'offsite_impl2csv=offsite.apps.auxiliary.offsite_impl2csv:run',
+            'offsite_plot=offsite.apps.auxiliary.offsite_plot:run',
         ],
     }
 )

@@ -1,929 +1,24 @@
 """@package code_tree
-Definitions of classes CodeNodeType, CodeNode, RootNode, LoopNode, CommunicationNode, ComputationNode, SwapNode,
-KernelNode, PModelNode, CodeTree, CodeTreeGenerator.
+Definitions of classes CodeTree, CodeTreeGenerator.
 """
 
-from abc import abstractmethod
 from copy import deepcopy
-from enum import Enum
 from re import sub
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import attr
 from lark import Visitor, tree as _tree, lexer as _lexer
 
-import offsite.config
-from offsite.codegen.codegen_util import indent, replace_var_with_factor, replace_incr_with_assign_op, \
-    substitute_rhs_call, write_instrument_kernel_start, write_instrument_kernel_end
+from offsite.codegen.code_node import CodeNodeType, CodeNode, CommunicationNode, ComputationNode, KernelNode, \
+    LoopNode, PModelNode, RootNode, SwapNode
+from offsite.codegen.codegen_util import replace_var_with_factor, replace_incr_with_assign_op
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.math_utils import eval_math_expr
 
 
-class CodeNodeType(Enum):
-    LOOP = 'LOOP'
-    COMPUTATION = 'COMPUTATION'
-    COMMUNICATION = 'COMMUNICATION'
-    KERNEL = 'KERNEL'
-    PMODEL = 'PMODEL'
-    SWAP = 'SWAP'
-    ROOT = 'ROOT'
-
-
-@attr.s
-class CodeNode:
-    """Representation of a code node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    """
-    indent = attr.ib(type=int)
-    type = attr.ib(type=CodeNodeType)
-    prev = attr.ib(type='CodeNode')
-    next = attr.ib(type='CodeNode')
-    parent = attr.ib(type='CodeNode')
-    child = attr.ib(type='CodeNode')
-
-    def set_relatives(self, prev: 'CodeNode', nxt: 'CodeNode', parent: 'CodeNode', child: 'CodeNode'):
-        """Set relations of this object.
-
-        Parameters:
-        -----------
-        prev: CodeNode
-            New left sibling node.
-        nxt: CodeNode
-            New right sibling node.
-        parent: CodeNode
-            New parent sibling node.
-        child: CodeNode
-            New child sibling node.
-
-        Returns:
-        --------
-        -
-        """
-        self.prev = prev
-        self.next = nxt
-        self.parent = parent
-        self.child = child
-
-    @abstractmethod
-    def to_codeline(self) -> str:
-        pass
-
-    @abstractmethod
-    def to_implementation_codeline(self) -> str:
-        pass
-
-    @abstractmethod
-    def to_kerncraft_codeline(self) -> str:
-        pass
-
-    @abstractmethod
-    def to_yasksite_codeline(self) -> str:
-        pass
-
-
-@attr.s
-class RootNode(CodeNode):
-    """Representation of a root node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    name: str
-        Name identifier of the code tree.
-    """
-    name = attr.ib(str)
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return ''
-
-    def to_implementation_codeline(self) -> str:
-        """Write node content to implementation code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return self.to_codeline()
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return self.to_codeline()
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return self.to_codeline()
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return self.to_codeline()
-
-
-@attr.s
-class LoopNode(CodeNode):
-    """Representation of a loop node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    var: str
-        Loop variable.
-    start: str
-        Start value of the loop variable.
-    boundary: str
-        Break condition of the the loop. (assuming < condition).
-    optional_args: list of str
-        Optional loop arguments (unroll, assign, ...)
-    optimize_unroll: int
-        Global unroll id used to determine in which order loop nests are unrolled.
-    optimize_assign: int
-        Turn all statements in iteration 'optimize_assign' into assignment statements.
-    pragmas: list of str
-        Pragmas attached to this loop object.
-    flag: bool
-        Helper flag used during code generation (e.g. to skip loops)
-    """
-    var = attr.ib(type=str)
-    start = attr.ib(type=str)
-    boundary = attr.ib(type=str)
-
-    optional_args = attr.ib(type=List['str'], default=list())
-    optimize_unroll = attr.ib(type=int, default=None)
-    optimize_assign = attr.ib(type=int, default=None)
-
-    pragmas = attr.ib(type=List['str'], default=list())
-
-    flag = attr.ib(type=bool, default=False, init=False)
-
-    def __attrs_post_init__(self):
-        """Parse optional arguments during object creation.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        -
-        """
-        num_args = len(self.optional_args)
-        # Parse optional arguments.
-        if self.optional_args:
-            if self.optional_args[0] == 'unroll':
-                if num_args == 1:
-                    self.optimize_unroll = 0
-                else:
-                    self.optimize_unroll = int(self.optional_args[1])
-            else:
-                raise RuntimeError('Invalid argument for loop node: ' + self.optional_args[0])
-            if num_args > 2:
-                if self.optional_args[2] == 'assign':
-                    if num_args > 3:
-                        self.optimize_assign = int(self.optional_args[3])
-                    else:
-                        raise RuntimeError('Missing argument! \'assign\' requires iteration number (e.g. assign 0): ')
-            if num_args > 4:
-                raise RuntimeError('Too many arguments (max==4) for loop node: ' + self.optional_args)
-        # Strip empty space from members.
-        self.var = self.var.strip()
-        if isinstance(self.boundary, str):
-            self.boundary = self.boundary.strip()
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        pragmas = '\n'.join(self.pragmas) + ('\n' if self.pragmas else '')
-        return pragmas + indent(self.indent) + 'for (int ' + self.var + '=' + str(self.start) + '; ' + self.var + '<' + \
-               self.boundary + '; ++' + self.var + ') {' + '\n'
-
-    def to_implementation_codeline(self) -> str:
-        """Write node content to implementation code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        return self.to_codeline()
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return self.to_codeline()
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        config = offsite.config.offsiteConfig
-        # Adjust loop boundaries if the loop runs over the system dimension.
-        if self.var == config.var_idx:
-            first = config.var_first_idx
-            last = config.var_last_idx
-            comparator = '<='
-        else:
-            first = self.start
-            last = self.boundary
-            comparator = '<'
-        # Write pragmas
-        pragmas = '\n'.join(self.pragmas) + ('\n' if self.pragmas else '')
-        # Write code
-        return pragmas + indent(self.indent) + 'for (int ' + self.var + '=' + str(
-            first) + '; ' + self.var + comparator + \
-               last + '; ++' + self.var + ') {' + '\n'
-
-    def to_tiling_kernel_codeline(self, block_varname: str) -> str:
-        """Write node content to tiling kernel code line.
-
-        Parameters:
-        -----------
-        block_varname: str
-        Name suffix of the block size variable.
-
-        Returns:
-        --------
-        str
-            Written code line.
-        """
-        config = offsite.config.offsiteConfig
-        # We only support tiling the system dimension loop right now.
-        assert self.var == config.var_idx
-        # Write pragmas.
-        pragmas = '\n'.join(self.pragmas) + ('\n' if self.pragmas else '')
-        # Write code.
-        bs_var = 'bs_{}'.format(block_varname)
-        return pragmas + indent(
-            self.indent) + 'for (int ' + self.var + '= jj; ' + self.var + ' < ' + bs_var + ' + jj; ++' + self.var + \
-               ') {' + '\n'
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Yasksite code generation does not support loop nodes!')
-
-
-@attr.s
-class CommunicationNode(CodeNode):
-    """Representation of a communication node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    operation: str
-        Name of the communication operation.
-    input_var_name: str
-        Name of the used input vector variable.
-    """
-    operation = attr.ib(type=str)
-    input_var_name = attr.ib(type=str, default=None)
-
-    def to_codeline(self, ivp: 'IVP' = None) -> str:
-        """Write node content to code line.
-
-         Parameters:
-         -----------
-         ivp: IVP
-            Used IVP.
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        if self.operation == 'omp_barrier':
-            return '#pragma omp barrier \n'
-        elif self.operation == 'mpi_allgather':
-            assert self.input_var_name is not None
-            code = '#pragma omp master\n'
-            code += '{\n'
-            code += 'MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, {}, NP, MPI_DOUBLE, MPI_COMM_WORLD);'.format(
-                self.input_var_name)
-            code += '}\n'
-            return code
-        elif self.operation == 'mpi_communicate':
-            assert self.input_var_name is not None
-            code = '#pragma omp master\n'
-            code += '{\n'
-            code += 'communicate({});'.format(self.input_var_name)
-            code += '}\n'
-            return code
-        raise RuntimeError('Communication node contains unknown/unsupported communication operation!')
-
-    def to_implementation_codeline(self, ivp: 'IVP' = None) -> str:
-        """Write node content to implementation code line.
-
-         Parameters:
-         -----------
-         ivp: IVP
-            Used IVP.
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return self.to_codeline(ivp)
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kerncraft code generation does not support communication nodes!')
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kernel code generation does not support communication nodes!')
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Yasksite code generation does not support communication nodes!')
-
-
-@attr.s
-class ComputationNode(CodeNode):
-    """Representation of a computation node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    computation: str
-        Computation (statement, function call, ...).
-    isIVPdepent: bool
-        Computation contains RHS evaluations.
-    """
-    computation = attr.ib(type=str)
-    isIVPdependent = attr.ib(type=bool, default=False)  # TODO deleteable?!
-
-    def __attrs_post_init__(self):
-        """Strip empty spaces from computation during object creation.
-
-        Parameters:
-        -----------
-        -
-
-        Returns:
-        --------
-        -
-        """
-        # Strip empty space from attribute computation.
-        self.computation = self.computation.strip()
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        # for debugging purposes only (--> used in CodeTree.visit())
-        return indent(self.indent) + self.computation + ';' + '\n'
-
-    def to_implementation_codeline(self) -> str:
-        """Write node content to implementation code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Implementation code generation does not support computation nodes!')
-
-    def to_kerncraft_codeline(self, rhs: str = None, ivp_constants: List[Tuple[str, str]] = None) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         rhs: str
-            Executed IVP component.
-         ivp_constants: list of tuple(str, str)
-            Available IVP constants.
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        if rhs and ivp_constants:
-            computation = substitute_rhs_call(self.computation, rhs, ivp_constants)
-        else:
-            computation = self.computation
-        return indent(self.indent) + computation + ';' + '\n'
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return self.to_codeline()
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return self.to_codeline()
-
-
-@attr.s
-class SwapNode(CodeNode):
-    """Representation of a pointer swap node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    arg1: str
-        First argument of the command.
-    arg2: str
-        Second argument of the command.
-    datatype: str
-        Used datatype.
-    """
-    arg1 = attr.ib(str)
-    arg2 = attr.ib(str)
-    datatype = attr.ib(str)
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        string = '\n'
-        string += '#pragma omp master\n'
-        string += '{\n'
-        string += indent(self.indent) + self.datatype + '** tmp = ' + self.arg1 + ' ;\n'
-        string += indent(self.indent) + self.arg1 + ' = ' + self.arg2 + ' ;\n'
-        string += indent(self.indent) + self.arg2 + ' = tmp;\n'
-        string += '}\n'
-        string += '\n'
-        return string
-
-    def to_implementation_codeline(self) -> str:
-        """Write node content to implementation code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return self.to_codeline()
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kerncraft code generation does not support swap nodes!')
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kernel code generation does not support swap nodes!')
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Yasksite code generation does not support swap nodes!')
-
-
-@attr.s
-class KernelNode(CodeNode):
-    """Representation of a kernel node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    template_name: str
-        Name of the associated kernel template.
-    input_var_name: str
-        Name of the used input vector variable.
-    """
-    template_name = attr.ib(str)
-    input_var_name = attr.ib(str)
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return indent(self.indent) + 'KERNEL ' + self.template_name + '\n'
-
-    def to_implementation_codeline(self, kernel_code: str, kernel_id: int, incl_instrumentation: bool = True) -> str:
-        """Write node content to implementation code line.
-
-         Parameters:
-         -----------
-         kernel_code: str
-            Written kernel code.
-        kernel_id: int
-            Database id of the written kernel.
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        # Write code.
-        code = '//{} %{}\n'.format(self.template_name, kernel_id)
-        code += write_instrument_kernel_start(self.indent) if incl_instrumentation else ''
-        code += kernel_code
-        code += write_instrument_kernel_end(self.indent, kernel_id) if incl_instrumentation else ''
-        return code
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kerncraft code generation does not support kernel nodes!')
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Kernel code generation does not support kernel nodes!')
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Yasksite code generation does not support kernel nodes!')
-
-
-@attr.s
-class PModelNode(CodeNode):
-    """Representation of a pmodel node object.
-
-    Attributes:
-    -----------
-    indent : int
-        Indent level of this object.
-    type: CodeNodeType
-        Node type of this object
-    prev: CodeNode
-        Left sibling node of this object.
-    next: CodeNode
-        Right sibling node of this object.
-    parent: CodeNode
-        Parent node of this object.
-    child: CodeNode
-        Child node of this object.
-    """
-
-    def to_codeline(self) -> str:
-        """Write node content to code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        return ''
-
-    def to_implementation_codeline(self) -> str:
-        """Write node content to implementation code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        self.to_codeline()
-
-    def to_kerncraft_codeline(self) -> str:
-        """Write node content to kerncraft code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        self.to_codeline()
-
-    def to_kernel_codeline(self) -> str:
-        """Write node content to kernel code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        self.to_codeline()
-
-    def to_yasksite_codeline(self) -> str:
-        """Write node content to yasksite code line.
-
-         Parameters:
-         -----------
-         -
-
-         Returns:
-         --------
-         str
-             Written code line.
-         """
-        raise NotImplementedError('Yasksite code generation does not support pmodel nodes!')
-
-
 @attr.s
 class CodeTree:
-    root = attr.ib(type=CodeNode, default=RootNode(0, CodeNodeType.ROOT, None, None, None, None))
+    root = attr.ib(type=CodeNode, default=RootNode(0, CodeNodeType.ROOT, None, None, None, None, ''))
 
     @staticmethod
     def substitute_butcher_coefficients(node: CodeNode, method: ODEMethod, use_dummy_values=False):
@@ -946,20 +41,20 @@ class CodeTree:
             # Replace A coefficients.
             for idx_row, A_row in enumerate(method.coefficientsA):
                 for idx_col, elem in enumerate(A_row):
-                    evaluated = eval_math_expr(elem, cast_to=str)
+                    evaluated: str = eval_math_expr(elem, cast_to=str)
                     node.computation = node.computation.replace('A[{}][{}]'.format(idx_row, idx_col), evaluated)
             # Replace b coefficients.
             for idx, elem in enumerate(method.coefficientsB):
-                evaluated = eval_math_expr(elem, cast_to=str)
+                evaluated: str = eval_math_expr(elem, cast_to=str)
                 node.computation = node.computation.replace('b[{}]'.format(idx), evaluated)
             # Replace c coefficients.
             for idx, elem in enumerate(method.coefficientsC):
-                evaluated = eval_math_expr(elem, cast_to=str)
+                evaluated: str = eval_math_expr(elem, cast_to=str)
                 node.computation = node.computation.replace('c[{}]'.format(idx), evaluated)
             # Replace not already substituted coefficients with dummy values. Helps enabling running some kernels
             # in kerncraft LC mode.
             if use_dummy_values:
-                node.computation = sub(r'A\[[\w|\s|\d][\w|\s|\d|+|-|\*/]?\]\[[\w|\s|\d][\w|\s|\d|\+-|\*/]?\]',
+                node.computation = sub(r'A\[[\w|\s|\d][\w|\s|\d|+|-|*/]?\]\[[\w|\s|\d][\w|\s|\d|+-|*/]?\]',
                                        '0.123', node.computation)
                 node.computation = sub(r'b\[[\w|\s|\d][\w|\s|\d|+|-|*|/]?\]', '0.456', node.computation)
                 node.computation = sub(r'c\[[\w|\s|\d][\w|\s|\d|+|-|*|/]?\]', '0.789', node.computation)
@@ -970,12 +65,12 @@ class CodeTree:
             CodeTree.substitute_butcher_coefficients(node.next, method, use_dummy_values)
 
     @staticmethod
-    def unroll_loop(loop: CodeNode):
+    def unroll_loop(loop: LoopNode):
         """Unroll the passed loop code tree.
 
         Parameters:
         -----------
-        loop: CodeNode
+        loop: LoopNode
             Root node of the code tree.
         skip_assign: bool
             If true do not apply assign optimization transformations.
@@ -987,10 +82,10 @@ class CodeTree:
         assert (loop.parent is not None) ^ (loop.prev is not None)
         assert loop.child is not None
         if loop.parent:
-            parent = loop.parent
+            parent: CodeNode = loop.parent
             parent.child = None
             # Cut loop body from original loop.
-            loop_bdy = loop.child
+            loop_bdy: CodeNode = loop.child
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, -1)
@@ -998,9 +93,9 @@ class CodeTree:
             parent.child = deepcopy(loop_bdy)
             parent.child.parent = parent
             # ..... unroll iteration 'start'.
-            cur_loop_bdy = parent.child
+            cur_loop_bdy: CodeNode = parent.child
             # Replace loop variable with current loop iteration index.
-            cur = cur_loop_bdy
+            cur: CodeNode = cur_loop_bdy
             while cur is not None:
                 cur.computation = replace_var_with_factor(loop.var, cur.computation, loop.start)
                 cur.computation = replace_incr_with_assign_op(cur.computation) if (
@@ -1009,9 +104,9 @@ class CodeTree:
                 cur = cur.next
             # ..... unroll all remaining iterations.
             for idx in range(int(loop.start) + 1, int(loop.boundary)):
-                loop_bdy_no_idx = deepcopy(loop_bdy)
+                loop_bdy_no_idx: CodeNode = deepcopy(loop_bdy)
                 # Replace loop variable with current loop iteration index.
-                cur = loop_bdy_no_idx
+                cur: CodeNode = loop_bdy_no_idx
                 while cur is not None:
                     cur.computation = replace_var_with_factor(loop.var, cur.computation, str(idx))
                     cur.computation = replace_incr_with_assign_op(cur.computation) if (
@@ -1030,10 +125,10 @@ class CodeTree:
             if loop.next:
                 loop.next.prev = cur_loop_bdy
         elif loop.prev:
-            sibling = loop.prev
+            sibling: CodeNode = loop.prev
             sibling.next = None
             # Cut loop body from original loop.
-            loop_bdy = loop.child
+            loop_bdy: CodeNode = loop.child
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, -1)
@@ -1041,9 +136,9 @@ class CodeTree:
             sibling.next = deepcopy(loop_bdy)
             sibling.next.prev = sibling
             # ..... unroll iteration 'start'.
-            cur_loop_bdy = sibling.next
+            cur_loop_bdy: CodeNode = sibling.next
             # Replace loop variable with current loop iteration index.
-            cur = cur_loop_bdy
+            cur: CodeNode = cur_loop_bdy
             while cur is not None:
                 cur.computation = replace_var_with_factor(loop.var, cur.computation, loop.start)
                 cur.computation = replace_incr_with_assign_op(cur.computation) if (
@@ -1052,9 +147,9 @@ class CodeTree:
                 cur = cur.next
             # ..... unroll iteration 'start'.
             for idx in range(int(loop.start) + 1, int(loop.boundary)):
-                loop_bdy_no_idx = deepcopy(loop_bdy)
+                loop_bdy_no_idx: CodeNode = deepcopy(loop_bdy)
                 # Replace loop variable with current loop iteration index.
-                cur = loop_bdy_no_idx
+                cur: CodeNode = loop_bdy_no_idx
                 while cur is not None:
                     cur.computation = replace_var_with_factor(loop.var, cur.computation, str(idx))
                     cur.computation = replace_incr_with_assign_op(cur.computation) if (
@@ -1073,12 +168,12 @@ class CodeTree:
                 loop.next.prev = cur_loop_bdy
 
     @staticmethod
-    def split_loop(loop: CodeNode):
+    def split_loop(loop: LoopNode):
         """Split the passed loop code tree.
 
         Parameters:
         -----------
-        loop: CodeNode
+        loop: LoopNode
             Root node of the code tree.
 
         Returns:
@@ -1090,11 +185,11 @@ class CodeTree:
         assert loop.split_at == 0
         # TODO: at the moment only supports splitting the first iteration
         if loop.parent:
-            parent = loop.parent
+            parent: CodeNode = loop.parent
             parent.child = None
             loop.parent = None
             # Copy loop body of the original loop.
-            loop_bdy = deepcopy(loop.child)
+            loop_bdy: CodeNode = deepcopy(loop.child)
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, 1)
@@ -1112,11 +207,11 @@ class CodeTree:
             cur_loop_bdy.next = loop
             loop.prev = cur_loop_bdy
         elif loop.prev:
-            sibling = loop.prev
+            sibling: CodeNode = loop.prev
             sibling.next = None
             loop.prev = None
             # Copy loop body of the original loop.
-            loop_bdy = deepcopy(loop.child)
+            loop_bdy: CodeNode = deepcopy(loop.child)
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, 1)
@@ -1161,14 +256,17 @@ class CodeTree:
         -----------
         node: CodeNode
             Root node of the code tree.
-        loop: CodeNode
+        loop: LoopNode
             Used loop node that determines the loop variable name and loop iteration index.
 
         Returns:
         --------
         -
         """
+        if node is None:
+            return
         if node.type == CodeNodeType.COMPUTATION:
+            node: ComputationNode
             node.computation = replace_var_with_factor(loop.var, node.computation, str(loop.split_at))
             node.computation = replace_incr_with_assign_op(node.computation) if loop.split_at == 0 else node.computation
         if node.child:
@@ -1177,7 +275,7 @@ class CodeTree:
             CodeTree.replace_loop_var_with_iteration_idx(node.next, loop)
 
     @staticmethod
-    def iteration_count(node: CodeNode, iter_count: str = '') -> str:
+    def iteration_count(node: CodeNode, iter_count: str = '', ignore_unroll: bool = False) -> str:
         """Count the total number of loop iteration of the current node's subtree.
 
         Parameters:
@@ -1192,19 +290,22 @@ class CodeTree:
         str
             Total number of loop iterations of the start node's subtree.
         """
-        if node.type == CodeNodeType.LOOP and 'unroll' not in node.optional_args:
+        if node is None:
+            return iter_count
+        if node.type == CodeNodeType.LOOP and ('unroll' not in node.optional_args or ignore_unroll):
+            node: LoopNode
             if iter_count:
                 iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
             else:
                 iter_count = '({} - {})'.format(node.boundary, node.start)
         if node.child:
-            iter_count = CodeTree.iteration_count(node.child, iter_count)
+            iter_count = CodeTree.iteration_count(node.child, iter_count, ignore_unroll)
         if node.next and node.type is not CodeNodeType.PMODEL:
-            iter_count = CodeTree.iteration_count(node.next, iter_count)
+            iter_count = CodeTree.iteration_count(node.next, iter_count, ignore_unroll)
         return iter_count
 
     @staticmethod
-    def iteration_count_up_to_root(node: CodeNode, iter_count: str = '') -> str:
+    def iteration_count_up_to_root(node: CodeNode, iter_count: str = '', ignore_unroll: bool = False) -> str:
         """Count the total number of loop iteration from the current node up to the root node.
 
         Parameters:
@@ -1219,18 +320,21 @@ class CodeTree:
         str
             Total number of loop iterations from the start node to the root node.
         """
-        if node.type == CodeNodeType.LOOP and 'unroll' not in node.optional_args:
+        if node is None:
+            return iter_count
+        if node.type == CodeNodeType.LOOP and ('unroll' not in node.optional_args or ignore_unroll):
+            node: LoopNode
             if iter_count:
                 iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
             else:
                 iter_count = '({} - {})'.format(node.boundary, node.start)
         if node.parent:
-            iter_count = CodeTree.iteration_count(node.parent, iter_count)
+            iter_count = CodeTree.iteration_count(node.parent, iter_count, ignore_unroll)
         return iter_count
 
     @staticmethod
     def find_pmodel_node(node: CodeNode, requested_idx: int, nxt_visited_idx=0,
-                         found_node: CodeNode = None) -> PModelNode:
+                         found_node: Optional[PModelNode] = None) -> Tuple[Optional[PModelNode], int]:
         """Traverse node's subtree and return the 'requested_idx' occurrence of a PModelNode object.
 
         Parameters:
@@ -1267,6 +371,75 @@ class CodeTree:
         return found_node, nxt_visited_idx
 
     @staticmethod
+    def count_communication(node: CodeNode, comm_count: Dict[str, str] = dict()) -> Dict[str, str]:
+        """Count the total number of communication operation executions in the current node's subtree.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        comm_count: Dict (key=str, val=str)
+            Current communication operation execution count.
+
+        Returns:
+        --------
+        Dict (key=str, val=str)
+            Total communication operation executions count of the start node's subtree.
+        """
+        if node is None:
+            return comm_count
+        if node.type == CodeNodeType.COMMUNICATION:
+            node: CommunicationNode
+            # Count number of executions of this operation.
+            execs = CodeTree.iteration_count_up_to_root(node.my_parent(), ignore_unroll=True)
+            execs = execs if execs else '1'
+            #
+            op: str = node.operation
+            op_count: str = comm_count[op] if op in comm_count else ''
+            comm_count[op] = eval_math_expr('{}+{}'.format(op_count, execs), cast_to=str)
+        if node.type == CodeNodeType.KERNEL:
+            pass
+            # print(xas)
+        if node.child:
+            comm_count = CodeTree.count_communication(node.child, comm_count)
+        if node.next and node.type is not CodeNodeType.PMODEL:
+            comm_count = CodeTree.count_communication(node.next, comm_count)
+        return comm_count
+
+    @staticmethod
+    def count_kernel(node: CodeNode, kernel_count: Dict[str, str] = dict()) -> Dict[str, str]:
+        """Count the total number of kernel executions in the current node's subtree.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        kernel_count: Dict (key=str, val=str)
+            Current kernel execution count.
+
+        Returns:
+        --------
+        Dict (key=str, val=str)
+            Total kernel executions count of the start node's subtree.
+        """
+        if node is None:
+            return kernel_count
+        if node.type == CodeNodeType.KERNEL:
+            node: KernelNode
+            # Count number of executions of this kernel.
+            execs = CodeTree.iteration_count_up_to_root(node.my_parent(), ignore_unroll=True)
+            execs = execs if execs else '1'
+            #
+            name: str = node.template_name
+            count: str = kernel_count[name] if name in kernel_count else ''
+            kernel_count[name] = eval_math_expr('{}+{}'.format(count, execs), cast_to=str)
+        if node.child:
+            kernel_count = CodeTree.count_kernel(node.child, kernel_count)
+        if node.next and node.type is not CodeNodeType.PMODEL:
+            kernel_count = CodeTree.count_kernel(node.next, kernel_count)
+        return kernel_count
+
+    @staticmethod
     def update_indent(node: CodeNode, change_by_val: int):
         """Update indention of the passed code tree by a given value.
 
@@ -1294,13 +467,15 @@ class CodeTreeGenerator(Visitor):
 
         self.code_tree = CodeTree()
 
-        self.last_visited_node = self.code_tree.root
-        self.switch_to_nxt_lvl = False
-        self.current_loop_lvl = None
-        self.current_indent_lvl = 0
-        self.current_pragmas = list()
+        self.last_visited_node: CodeNode = self.code_tree.root
+        self.switch_to_nxt_lvl: bool = False
+        self.current_loop_lvl: Optional[LoopNode] = None
+        self.current_indent_lvl: int = 0
+        self.current_pragmas: List[str] = list()
 
-    def get_relatives(self) -> Tuple[CodeNode, CodeNode, CodeNode, CodeNode]:
+        self.frame_lvl: int = 2
+
+    def get_relatives(self) -> Tuple[Optional[CodeNode], Optional[CodeNode], Optional[CodeNode], Optional[CodeNode]]:
         if self.switch_to_nxt_lvl:
             prev = None
             parent = self.current_loop_lvl
@@ -1311,10 +486,22 @@ class CodeTreeGenerator(Visitor):
         child = None
         return prev, nxt, parent, child
 
-    def move_up_loop_lvl(self, node: CodeNode) -> CodeNode:
+    def update_loop_lvl(self, tree: _tree.Tree):
+        lvl_gap = tree.lvl - self.current_indent_lvl
+        while lvl_gap != 1 and self.current_loop_lvl is not None:
+            # Update global information: last visited node.
+            self.last_visited_node = self.current_loop_lvl
+            # Move up a level in the loop hierarchy.
+            self.current_loop_lvl = self.move_up_loop_lvl(self.current_loop_lvl)
+            # Update level gap.
+            lvl_gap += 1
+            # Can't move above root level.
+            assert self.current_indent_lvl > 0
+
+    def move_up_loop_lvl(self, node: CodeNode) -> Optional[LoopNode]:
         self.current_indent_lvl -= 1
         #
-        parent = node.parent
+        parent: LoopNode = node.parent
         if parent:
             return parent
         while True:
@@ -1326,9 +513,9 @@ class CodeTreeGenerator(Visitor):
                 return parent
 
     @staticmethod
-    def read_loop_s(tree: 'lark.tree.Tree'):
+    def read_loop(tree: _tree.Tree):
         prev_is_pragma = False
-        base_idx = 1
+        base_idx = 0
         # Read pragmas.
         for entry in tree.children:
             if isinstance(entry, _tree.Tree) and entry.data == 'pragma':
@@ -1338,19 +525,25 @@ class CodeTreeGenerator(Visitor):
                 if prev_is_pragma and isinstance(entry, _lexer.Token) and entry.value == '\n':
                     base_idx += 1
                 prev_is_pragma = False
-        # Read variable and boundary.
+        # Read variable name.
         var = str(tree.children[base_idx])
-        bound = ''.join(str(x) for x in tree.children[base_idx + 1].children)
+        # Read loop boundary expression.
+        bound: Optional[Union[_tree.Tree, str]] = tree.children[base_idx + 1]
+        if isinstance(bound, _tree.Tree):
+            bound = ''.join(bound.children)
+        else:
+            bound = str(tree.children[base_idx + 1])
         # Read further optional arguments.
         opt_args = [str(entry) for entry in tree.children[(base_idx + 2):]]
         return var, bound, opt_args
 
-    def loop_s(self, tree: 'lark.tree.Tree'):
+    def loop(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Read tree information.
-        loop_var, loop_boundary, optional_args = self.read_loop_s(tree)
+        loop_var, loop_boundary, optional_args = self.read_loop(tree)
         # Create loop node.
         prev, nxt, parent, child = self.get_relatives()
-        node = LoopNode(self.current_indent_lvl, CodeNodeType.LOOP, prev, nxt, parent, child, loop_var, str(0),
+        node = LoopNode(tree.lvl - self.frame_lvl, CodeNodeType.LOOP, prev, nxt, parent, child, loop_var, str(0),
                         loop_boundary, optional_args, pragmas=self.current_pragmas)
         self.current_pragmas = list()
         # Update information.
@@ -1366,30 +559,21 @@ class CodeTreeGenerator(Visitor):
         # Move down a level in the loop hierarchy.
         self.switch_to_nxt_lvl = True
         self.current_loop_lvl = node
-        self.current_indent_lvl += 1
+        self.current_indent_lvl = tree.lvl
 
-    def loop_e(self, tree: 'lark.tree.Tree'):
+    def pragma(self, tree: _tree.Tree):
         # Read tree information.
-        loop_var = str(tree.children[1])
-        # Check if loop nesting is valid.
-        assert loop_var == self.current_loop_lvl.var
-        # Update global information: last visited node.
-        self.last_visited_node = self.current_loop_lvl
-        # Move up a level in the loop hierarchy.
-        self.current_loop_lvl = self.move_up_loop_lvl(self.current_loop_lvl)
-
-    def pragma(self, tree: 'lark.tree.Tree'):
-        # Read tree information.
-        pragma_id = str(tree.children[1])
+        pragma_id = str(tree.children[0])
         # Create pragma string.
         self.current_pragmas.append('#pragma ' + pragma_id)
 
-    def comp(self, tree: 'lark.tree.Tree'):
+    def comp(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Read tree information.
-        comp_id = str(tree.children[1])
+        comp_id = str(tree.children[0])
         # Create computation node.
         prev, nxt, parent, child = self.get_relatives()
-        node = ComputationNode(self.current_indent_lvl, CodeNodeType.COMPUTATION, prev, nxt, parent, child, comp_id)
+        node = ComputationNode(tree.lvl - self.frame_lvl, CodeNodeType.COMPUTATION, prev, nxt, parent, child, comp_id)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False
@@ -1402,7 +586,8 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def pmodel(self, tree: 'lark.tree.Tree'):
+    def pmodel(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Create pmodel node.
         prev, nxt, parent, child = self.get_relatives()
         node = PModelNode(self.current_indent_lvl, CodeNodeType.PMODEL, prev, nxt, parent, child)
@@ -1418,20 +603,21 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def comm(self, tree: 'lark.tree.Tree'):
+    def comm(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Read tree information.
-        comm_id = str(tree.children[1])
+        comm_id = str(tree.children[0])
         # Read optional input vector name argument.
-        input_vec = tree.children[2] if len(tree.children) > 2 else None
+        input_vec: Optional[Union[_tree.Tree, str]] = tree.children[1] if len(tree.children) > 1 else None
         if input_vec is not None:
             if isinstance(input_vec, _tree.Tree):
                 input_vec = '{}[{}]'.format(input_vec.children[0], input_vec.children[1])
             else:
                 input_vec = str(input_vec)
-        # Create computation node.
+        # Create communication node.
         prev, nxt, parent, child = self.get_relatives()
         node = CommunicationNode(
-            self.current_indent_lvl, CodeNodeType.COMMUNICATION, prev, nxt, parent, child, comm_id, input_vec)
+            tree.lvl - self.frame_lvl, CodeNodeType.COMMUNICATION, prev, nxt, parent, child, comm_id, input_vec)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False
@@ -1444,10 +630,11 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def kernel(self, tree: 'lark.tree.Tree'):
+    def kernel(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Read tree information.
-        kernel_id = str(tree.children[1])
-        input_vec = tree.children[2] if len(tree.children) > 2 else None
+        kernel_id = str(tree.children[0])
+        input_vec: Optional[Union[_tree.Tree, str]] = tree.children[1] if len(tree.children) > 1 else None
         if input_vec is not None:
             if isinstance(input_vec, _tree.Tree):
                 input_vec = '{}[{}]'.format(input_vec.children[0], input_vec.children[1])
@@ -1455,7 +642,8 @@ class CodeTreeGenerator(Visitor):
                 input_vec = str(input_vec)
         # Create computation node.
         prev, nxt, parent, child = self.get_relatives()
-        node = KernelNode(self.current_indent_lvl, CodeNodeType.KERNEL, prev, nxt, parent, child, kernel_id, input_vec)
+        node = KernelNode(
+            tree.lvl - self.frame_lvl, CodeNodeType.KERNEL, prev, nxt, parent, child, kernel_id, input_vec)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False
@@ -1468,14 +656,15 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def swap(self, tree: 'lark.tree.Tree'):
+    def swap(self, tree: _tree.Tree):
+        self.update_loop_lvl(tree)
         # Read tree information.
-        arg1 = str(tree.children[1])
-        arg2 = str(tree.children[2])
-        datatype = str(tree.children[3])
+        arg1 = str(tree.children[0])
+        arg2 = str(tree.children[1])
+        datatype = str(tree.children[2])
         # Create computation node.
         prev, nxt, parent, child = self.get_relatives()
-        node = SwapNode(self.current_indent_lvl, CodeNodeType.SWAP, prev, nxt, parent, child, arg1, arg2, datatype)
+        node = SwapNode(tree.lvl - self.frame_lvl, CodeNodeType.SWAP, prev, nxt, parent, child, arg1, arg2, datatype)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False
@@ -1488,6 +677,22 @@ class CodeTreeGenerator(Visitor):
         # Update global information: last visited node
         self.last_visited_node = node
 
-    def generate(self, lark_tree: 'lark.tree.Tree') -> CodeTree:
+    def generate(self, lark_tree: _tree.Tree) -> CodeTree:
+        #
+        lark_tree.lvl = 0
+        LevelCounter().visit_topdown(lark_tree)
+        #
         self.visit_topdown(lark_tree)
         return self.code_tree
+
+
+class LevelCounter(Visitor):
+    def __default__(self, tree):
+        for subtree in tree.children:
+            if isinstance(subtree, _tree.Tree):
+                assert not hasattr(subtree, 'parent')
+                assert not hasattr(subtree, 'lvl')
+                try:
+                    subtree.lvl = tree.lvl + 1
+                except AttributeError:
+                    subtree.lvl = 1

@@ -4,7 +4,6 @@ Definition of class OmpBarrierBenchmark.
 
 from pathlib import Path
 from subprocess import run, PIPE, CalledProcessError
-from sys import version_info
 from typing import List
 
 import attr
@@ -20,18 +19,18 @@ class OmpBarrierBenchmark:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this benchmark.
-    folder : Path
+    folder: Path
         Folder to store source code in.
-    source : Path
+    source: Path
         Path to source code file associated with this benchmark.
-    parameters : set of str
+    parameters: set of str
         Parameters of this benchmark.
-    binary : Path
+    binary: Path
         Path to binary object file of this benchmark compiled for a given
         configuration of machine and compiler.
-    compiled_for : Machine
+    compiled_for: Machine
         Machine this benchmark was compiled for last.
 
     """
@@ -57,16 +56,16 @@ class OmpBarrierBenchmark:
         if self.binary.exists() and self.binary.is_file():
             self.binary.unlink()
 
-    def run(self, machine: Machine, repetitions: int, save_in_db=True) -> List['BenchmarkRecord']:
+    def run(self, machine: Machine, repetitions: int, save_in_db=True) -> List[BenchmarkRecord]:
         """Run the omp_barrier benchmark on a given machine.
 
         Parameters:
         -----------
-        machine : Machine
+        machine: Machine
             Machine the benchmark is ran on.
-        repetitions : int
+        repetitions: int
             Number of times this benchmark is executed.
-        save_in_db : bool
+        save_in_db: bool
             If True create valid BenchmarkRecord database entries.
 
         Returns:
@@ -74,29 +73,25 @@ class OmpBarrierBenchmark:
         list of BenchmarkRecord
             Benchmark data obtained on the given machine.
         """
-        data = list()
+        data: List[BenchmarkRecord] = list()
         # Compile benchmark for given machine.
         if self.compiled_for is not machine or not self.binary_exists():
             self.compile(machine)
         # Run benchmark for all core numbers.
         for cores in range(1, machine.coresPerSocket + 1):
-            times = list()
+            times: List[float] = list()
             try:
                 for _ in range(1, repetitions + 1):
-                    if version_info[1] > 5:
-                        runtime = run(['./{}'.format(self.binary), str(cores), str(repetitions)], check=True,
-                                      encoding='utf-8', stdout=PIPE).stdout
-                    else:
-                        runtime = run(['./{}'.format(self.binary), str(cores), str(repetitions)], check=True,
-                                      stdout=PIPE).stdout
-                        runtime = runtime.decode("utf-8")
+                    cmd = ['./{}'.format(self.binary), str(cores), str(repetitions)]
+                    # Run benchmark for current configuration.
+                    runtime = run(cmd, check=True, encoding='utf-8', stdout=PIPE).stdout
                     times.append(float(runtime))
             except CalledProcessError as error:
                 print('OmpBarrierBenchmark failed: {}'.format(error))
             # Remove outliers.
-            times = remove_outliers(times)
+            times: List[float] = remove_outliers(times)
             # Runtime as mean of all times measured.
-            runtime = sum(times) / len(times)
+            runtime: float = sum(times) / len(times)
             # Save benchmark record.
             record = BenchmarkRecord(self.name, machine.db_id if save_in_db else -1,
                                      machine.compiler.db_id if save_in_db else -1, runtime, machine.clock, cores)
@@ -108,7 +103,7 @@ class OmpBarrierBenchmark:
 
         Parameters:
         -----------
-        machine : Machine
+        machine: Machine
             Machine the benchmark is compiled for.
 
         Returns:

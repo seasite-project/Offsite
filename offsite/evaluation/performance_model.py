@@ -3,7 +3,7 @@ Performance modeling functions.
 """
 
 from enum import Enum
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import attr
 
@@ -20,11 +20,11 @@ def compute_pmodel_kernel_pred(num_iterations: int, machine: Machine, ecm: float
 
     Parameters:
     -----------
-    num_iterations : int
+    num_iterations: int
         Number of iterations executed by the PModelKernel considered.
-    machine : Machine
+    machine: Machine
         Machine the kernel is run on.
-    ecm : float
+    ecm: float
         ECM result (in cycles per cache line) obtained by the kerncraft tool for the PModelKernel considered when
         executing 'num_iterations' iterations.
 
@@ -45,10 +45,10 @@ def compute_kernel_runtime_pred(pmodel_predictions: List[str], frequency: float)
 
     Parameters:
     -----------
-    pmodel_predictions : list of str
+    pmodel_predictions: list of str
         PModel kernel predictions obtained for the pmodel kernels associated with this Kernel when running on a
         particular number of CPU cores.
-    frequency : float
+    frequency: float
         CPU frequency the kernel is executed with.
 
     Returns:
@@ -76,14 +76,14 @@ def compute_impl_variant_runtime_pred(associated_kernels: Tuple[int], kernel_run
 
     Parameters:
     -----------
-    associated_kernels : tuple of int
+    associated_kernels: tuple of int
         Ids of the Kernel objects associated with this implementation variant.
-    kernel_runtime_preds : dict (key: Kernel object id)
+    kernel_runtime_preds: dict (key: Kernel object id)
         Kernel runtime predictions obtained for the kernels associated with this implementation variant.
-    executions : dict (key: Kernel object id)
+    executions: dict (key: Kernel object id)
         Number of times the kernels associated with this implementation variant are run when executing a single time
         step.
-    communication_costs : float
+    communication_costs: float
         Communication costs per step of this implementation variant.
 
     Returns:
@@ -125,19 +125,25 @@ class SampleInterval:
 
     Attributes:
     -----------
-    first : int
+    first: int
         First value included in the sample interval.
-    last : int
+    last: int
         First value included in the sample interval.
-    sample : int
+    sample: int
         Actual value used to sample the interval.
-    position : SamplePosition
+    position: SamplePosition
         Type of the interval. Can be either 'INNER' or 'BORDER'.
     """
     first = attr.ib(type=int)
     last = attr.ib(type=int)
     sample = attr.ib(type=int, default=None)
     region = attr.ib(type=SamplePosition, default=SamplePosition.INNER)
+
+    def __attrs_post_init__(self):
+        self.first = int(self.first)
+        self.last = int(self.last)
+        if self.sample is not None:
+            self.sample = int(self.sample)
 
     def __hash__(self):
         return hash((self.first, self.last))
@@ -148,7 +154,7 @@ class SampleInterval:
     def __ne__(self, other):
         return not self == other
 
-    def median(self, ivp: IVP = None) -> int:
+    def median(self, ivp: Optional[IVP] = None) -> int:
         """Return median value of this interval.
 
         If an IVP is passed not the exact median is returned but the nearest value that satisfies the constraints of

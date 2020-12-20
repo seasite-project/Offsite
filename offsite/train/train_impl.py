@@ -4,21 +4,23 @@ Functions to train the tuning database with implementation variant predictions.
 
 from multiprocessing import cpu_count, Pool
 from traceback import print_exc
-from typing import Dict, List
+from typing import Dict, List, Union
 
+from pandas import DataFrame
 from sqlalchemy.orm import Session
 
 import offsite.config
 from offsite.config import ModelToolType
 from offsite.db.db import commit
 from offsite.descriptions.impl_skeleton import ImplSkeleton
+from offsite.descriptions.impl_variant import ImplVariant
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.benchmark import BenchmarkRecord
 from offsite.evaluation.math_utils import eval_math_expr, corrector_steps, ivp_grid_size, stages
 from offsite.evaluation.performance_model import compute_impl_variant_runtime_pred
-from offsite.evaluation.records import ImplVariantRecord
+from offsite.evaluation.records import ImplVariantRecord, KernelRecord
 from offsite.train.train_utils import deduce_available_impl_variants, deduce_impl_variant_sample_intervals, \
     fetch_and_sort_kernel_runtime_prediction_data
 
@@ -29,15 +31,15 @@ def train_impl_variant_predictions(db_session: Session, machine: Machine, skelet
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : Machine
+    machine: Machine
         Used machine.
-    skeletons : List of ImplSkeleton
+    skeletons: List of ImplSkeleton
         Trained ImplSkeleton objects.
-    methods : List of ODEMethod.
+    methods: List of ODEMethod.
         Used ode methods.
-    ivps : List of IVP
+    ivps: List of IVP
         Used IVPs.
 
     Returns:
@@ -112,36 +114,39 @@ def train_impl_variant_predictions(db_session: Session, machine: Machine, skelet
     if errors:
         db_session.rollback()
         raise RuntimeError('Failed to train implementation variant predictions: Error in worker threads.')
+    # Before training the database, reduce the total number of intervals by combining adjacent intervals giving the
+    # same prediction.
+    records = ImplVariantRecord.fuse_equal_records(records)
     # Train database with implementation variant runtime predictions.
     ImplVariantRecord.update(db_session, records)
 
 
 def compute_impl_variant_predictions(
-        impl_variants: List['ImplVariant'], skeleton: ImplSkeleton, method: ODEMethod, ivp: IVP, machine: Machine,
-        benchmark_data: 'pandas.DataFrame', kernel_executions: Dict[int, 'sympy.Basic'],
-        prediction_data: Dict[int, Dict[int, List['KernelRecord']]]) -> List[ImplVariantRecord]:
+        impl_variants: List[ImplVariant], skeleton: ImplSkeleton, method: ODEMethod, ivp: IVP, machine: Machine,
+        benchmark_data: DataFrame, kernel_executions: Dict[int, Union[str, int, float]],
+        prediction_data: Dict[int, Dict[int, List[KernelRecord]]]) -> List[ImplVariantRecord]:
     """
     Compute implementation variant runtime predictions for a set of implementation variants and a given configuration
     of machine, ODE method and IVP.
 
     Parameters:
     -----------
-    impl_variants
+    impl_variants: list of ImplVariant
         List of available implementation variants derived from the used implementation skeleton.
-    skeleton : ImplSkeleton
+    skeleton: ImplSkeleton
         Used implementation skeleton.
-    method : ODE method
+    method: ODE method
         Used ODE method.
-    ivp : IPV
+    ivp: IPV
         Used IVP.
-    machine : Machine
+    machine: Machine
         Used machine.
-    benchmark_data : pandas.DataFrame
+    benchmark_data: pandas.DataFrame
         Benchmark data obtained for the communication operations required by the implementation skeleton used.
-    kernel_executions : dict (key=int, value=sympy.Basic)
+    kernel_executions: dict (key=int, value=sympy.Basic)
         Number of times the single kernels associated with this implementation skeleton are executed in a single
         iteration step.
-    prediction_data : dict of dict (value=list of KernelRecord)
+    prediction_data: dict of dict (value=list of KernelRecord)
         Kernel prediction data required to compute implementation variant runtime predictions for the used
         implementation skeleton.
 

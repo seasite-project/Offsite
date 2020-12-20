@@ -7,7 +7,7 @@ from enum import IntEnum
 from pathlib import Path
 from pickle import dumps, loads, HIGHEST_PROTOCOL
 from re import findall, split as re_split, S
-from typing import Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import attr
 from ruamel import yaml
@@ -45,7 +45,7 @@ class ComponentDesc:
 
         Parameters:
         -----------
-        yaml_data : dict
+        yaml_data: dict
             YAML object describing this object.
 
         Returns:
@@ -101,7 +101,7 @@ class ComponentDict(dict):
 
         Parameters:
         -----------
-        name : str
+        name: str
             Identifier of the component requested.
 
         Returns:
@@ -147,7 +147,7 @@ class ComputationDict(dict):
 
         Parameters:
         -----------
-        computations : dict
+        computations: dict
             Dict of computation descriptions to be stored.
 
         Returns:
@@ -171,7 +171,7 @@ class ComputationDict(dict):
 
         Parameters:
         -----------
-        name : str
+        name: str
             Identifier of the computation requested.
 
         Returns:
@@ -217,7 +217,7 @@ class ConstantDict(dict):
 
         Parameters:
         -----------
-        constants : list
+        constants: list of str
             List of constant descriptions to be stored.
 
         Returns:
@@ -268,7 +268,7 @@ class ConstantDict(dict):
 
         Parameters:
         -----------
-        name : str
+        name: str
             Identifier of the constant requested.
 
         Returns:
@@ -319,7 +319,7 @@ class DatastructDesc:
 
         Parameters:
         -----------
-        datatype : dict
+        datatype: dict
             YAML object describing this object.
 
         Returns:
@@ -471,7 +471,7 @@ class DatastructDict(dict):
 
         Parameters:
         -----------
-        datastruct : list
+        datastruct: list of str
             List of datastruct descriptions to be stored.
 
         Returns:
@@ -533,7 +533,7 @@ class DatastructDict(dict):
 
         Parameters:
         -----------
-        name : str
+        name: str
             Identifier of the datastruct requested.
 
         Returns:
@@ -562,7 +562,7 @@ def serialize_obj(obj) -> str:
     return encode(dumps(obj, HIGHEST_PROTOCOL), 'base64').decode()
 
 
-def deserialize_obj(serialized_obj: str) -> Union[ComputationDesc, ConstantDesc, DatastructDesc]:
+def deserialize_obj(serialized_obj: str) -> Any:
     """Deserialize object data encoded in base64.
 
     Parameters:

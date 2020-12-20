@@ -12,8 +12,8 @@ import attr
 from sortedcontainers import SortedDict
 
 import offsite.config
-from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
-from offsite.codegen.codegen_util import eval_loop_boundary, format_codefile, write_closing_bracket, create_variantname
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, KernelNode, LoopNode
+from offsite.codegen.codegen_util import eval_loop_boundary, format_codefile, write_closing_bracket, create_variant_name
 from offsite.codegen.kernel_generator import KernelCodeGenerator
 from offsite.descriptions.impl_skeleton import ImplSkeleton
 from offsite.descriptions.ivp import IVP
@@ -65,6 +65,7 @@ class ImplCodeGeneratorCpp:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             if node.optimize_unroll is not None:
                 self.unroll_stack[node.optimize_unroll] = node
         if node.child:
@@ -136,11 +137,11 @@ class ImplCodeGeneratorCpp:
             kernels = self.derive_impl_variant_kernels(variant)
             # Generate implementation variant.
             # .. generate code.
-            name = Path('{}/{}.hpp'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+            name = Path('{}/{}.hpp'.format(self.folder_impl, create_variant_name(kernels, skeleton.name)))
             codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp)
             # .. generate tiled version too?
             if config.args.tile:
-                name = Path('{}/{}_tiled.hpp'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+                name = Path('{}/{}_tiled.hpp'.format(self.folder_impl, create_variant_name(kernels, skeleton.name)))
                 vid = 123456
                 # TODO fix variant number
                 codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, True)
@@ -163,10 +164,12 @@ class ImplCodeGeneratorCpp:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             # Evaluate loop boundary expression.
             constants = [corrector_steps(method), stages(method)]
             node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.KERNEL:
+            node: KernelNode
             # Load kernel template from database.
             if node.template_name not in self.loaded_templates.keys():
                 template = KernelTemplate.from_database(self.db_session, node.template_name)
@@ -178,18 +181,18 @@ class ImplCodeGeneratorCpp:
         if node.next:
             self.generate_implementation_tree(node.next, skeleton, method)
 
-    def derive_impl_variant_kernels(self, impl_variant: List[str]) -> List[Kernel]:
+    def derive_impl_variant_kernels(self, impl_variant: List[int]) -> List[Kernel]:
         return [self.map_kernel_id_to_object(kid) for kid in impl_variant]
 
-    def map_kernel_id_to_object(self, kernel_id: str) -> 'Kernel':
+    def map_kernel_id_to_object(self, kernel_id: int) -> 'Kernel':
         # Query kernel object from database.
-        kernel = Kernel.select(self.db_session, kernel_id)
+        kernel: Kernel = Kernel.select(self.db_session, kernel_id)
         # Select corresponding kernel template.
-        template = self.loaded_templates[kernel.template.name]
+        template: KernelTemplate = self.loaded_templates[kernel.template.name]
         try:
             return next(filter(lambda x: x.name == kernel.name, template.variants))
         except StopIteration:
-            raise RuntimeError('')
+            raise RuntimeError('Failed to find kernel \'{}\'!'.format(kernel.name))
 
     def generate_impl_variant(self, impl: CodeNode, variant_id: int, kernels: List[Kernel], skeleton: ImplSkeleton,
                               method: ODEMethod, ivp: IVP, gen_tiled_code: bool = False) -> str:
@@ -217,29 +220,26 @@ class ImplCodeGeneratorCpp:
         str
             Generated implementation variant code.
         """
-        variant_name = create_variantname(kernels, skeleton.name)
+        variant_name: str = create_variant_name(kernels, skeleton.name)
         # Generate implementation variant code.
-        code = ImplCodeGeneratorCpp.generate_implementation_code(impl, kernels, method, ivp, gen_tiled_code)
+        code: str = ImplCodeGeneratorCpp.generate_implementation_code(impl, kernels, method, gen_tiled_code)
         # Write frame code.
-        code = self.write_skeleton_includes(skeleton, method, ivp) + \
-               self.write_class(variant_name, variant_id, method.name, code)
-        return code
+        return self.write_skeleton_includes(skeleton, method, ivp) + self.write_class(variant_name, variant_id,
+                                                                                      method.name, code)
 
     @staticmethod
-    def generate_implementation_code(node: CodeNode, kernels: Dict[str, 'Kernel'], method: ODEMethod, ivp: IVP,
-                                     gen_tiled_code: bool, code: str = '') -> str:
+    def generate_implementation_code(
+            node: CodeNode, kernels: List[Kernel], method: ODEMethod, gen_tiled_code: bool, code: str = '') -> str:
         """Write implementation variant code.
 
         Parameters:
         -----------
         node: CodeNode
             Root node of the code tree.
-        kernels: dict (key=str, val=Kernel)
+        kernels: list of Kernel
             Used kernels.
         method: ODEMethod
             Used ODE method.
-        ivp: IVP
-            Used IVP.
         gen_tiled_code: bool
             Generated tiled code version.
         code: str
@@ -252,10 +252,11 @@ class ImplCodeGeneratorCpp:
         """
         config = offsite.config.offsiteConfig
         if node.type == CodeNodeType.KERNEL:
+            node: KernelNode
             try:
-                kernel = next(filter(lambda x: x.template.name == node.template_name, kernels))
+                kernel: Kernel = next(filter(lambda x: x.template.name == node.template_name, kernels))
             except StopIteration:
-                print('')
+                raise RuntimeError('Failed to find kernel template \'{}\'!'.format(node.template_name))
             # Determine the used input vector.
             input_vector = ''
             if kernel.template.isIVPdependent:
@@ -266,20 +267,18 @@ class ImplCodeGeneratorCpp:
                 else:
                     input_vector = config.ode_solution_vector
             # Create kernel code
-            kernel_code = KernelCodeGenerator().generate(kernel, method, input_vector, gen_tiled_code)
+            kernel_code: str = KernelCodeGenerator().generate(kernel, method, input_vector, gen_tiled_code)
             code += node.to_implementation_codeline(kernel_code, kernel.db_id, False)
-        elif node.type == CodeNodeType.COMMUNICATION:
-            code += node.to_implementation_codeline(ivp)
         elif node.type != CodeNodeType.ROOT:
             code += node.to_implementation_codeline()
         # Traverse tree depth first.
         if node.child:
-            code += ImplCodeGeneratorCpp.generate_implementation_code(node.child, kernels, method, ivp, gen_tiled_code)
+            code += ImplCodeGeneratorCpp.generate_implementation_code(node.child, kernels, method, gen_tiled_code)
         # Close opened brackets.
         if node.type == CodeNodeType.LOOP:
             code += write_closing_bracket(node.indent)
         if node.next:
-            code += ImplCodeGeneratorCpp.generate_implementation_code(node.next, kernels, method, ivp, gen_tiled_code)
+            code += ImplCodeGeneratorCpp.generate_implementation_code(node.next, kernels, method, gen_tiled_code)
         return code
 
     def write_skeleton_includes(self, skeleton: ImplSkeleton, method: ODEMethod, ivp: IVP) -> str:
@@ -520,9 +519,9 @@ class ImplCodeGeneratorCpp:
 
         Parameters:
         -----------
-        name : str
+        name: str
             Name of the array.
-        data : List of List of str
+        data: List of List of str
             Array data.
 
         Returns:
@@ -546,9 +545,9 @@ class ImplCodeGeneratorCpp:
 
         Parameters:
         -----------
-        name : str
+        name: str
             Name of the array.
-        data : List of str
+        data: List of str
             Array data.
 
         Returns:
@@ -563,99 +562,6 @@ class ImplCodeGeneratorCpp:
         array_str += '};\n'
         array_str += '\n'
         return array_str
-
-    # def write_datastructures(self, skeleton: str):
-    #     """Write data structures to file.
-    #
-    #     Parameters:
-    #     -----------
-    #     skeleton: str
-    #         Name of the used implementation skeleton.
-    #
-    #     Returns:
-    #     --------
-    #     -
-    #     """
-    #     dstruct_name = 'DS_' + skeleton
-    #     # Create folder if it does not yet exist.
-    #     if self.folder and not self.folder.exists():
-    #         self.folder.mkdir(parents=True)
-    #     # Write inclusion guard first.
-    #     dstruct_str = '#pragma once\n\n'
-    #     # Write define.
-    #     dstruct_str += '#define allocate_data_structures {}\n\n'.format(dstruct_name)
-    #     # Write include of base class.
-    #     dstruct_str += '#include "Datastructure.hpp"\n\n'
-    #     # Open class.
-    #     dstruct_str += 'class {} : public Datastructure\n'.format(dstruct_name)
-    #     dstruct_str += '{\n'
-    #     # Write private members.
-    #     dstruct_str += 'private:\n'
-    #     dstruct_str += 'size_t n, s;\n'
-    #     # Write public members.
-    #     dstruct_str += 'public:\n'
-    #     for name, desc in self.required_datastructs.items():
-    #         # Skip names reserved for Butcher table entries.
-    #         if name in ('A', 'b', 'c'):
-    #             continue
-    #         # Skip names reserved for pre-defined variables.
-    #         if name in ('h', 't', 'g', 'y'):
-    #             continue
-    #         dstruct_str += '{} {}{};\n'.format(desc.datatype, '*' * desc.struct_type, name)
-    #     dstruct_str += '\n'
-    #     # Write constructor.
-    #     dstruct_str += '{}(size_t s, size_t n)\n'.format(dstruct_name)
-    #     dstruct_str += '{\n'
-    #     # Write allocate memory.
-    #     for name, desc in self.required_datastructs.items():
-    #         # Skip names reserved for Butcher table entries.
-    #         if name in ('A', 'b', 'c'):
-    #             continue
-    #         # Skip names reserved for pre-defined variables.
-    #         if name in ('h', 't', 'g', 'y'):
-    #             continue
-    #         if desc.struct_type == DatastructType.array1D:
-    #             dstruct_str += '{} = alloc1d({});\n'.format(name, desc.size[0])
-    #         elif desc.struct_type == DatastructType.array2D:
-    #             dstruct_str += '{} = alloc2d({}, {});\n'.format(name, desc.size[0], desc.size[1])
-    #         elif desc.struct_type == DatastructType.array3D:
-    #             dstruct_str += '{} = alloc3d({}, {}, {});\n'.format(name, desc.size[0], desc.size[1], desc.size[2])
-    #         else:
-    #             assert False
-    #     dstruct_str += '\n'
-    #     # Write members.
-    #     dstruct_str += 'this->s = s;\n'
-    #     dstruct_str += 'this->n = n;\n'
-    #     # End constructor.
-    #     dstruct_str += '}\n\n'
-    #     # Write destructor.
-    #     dstruct_str += '~{}()\n'.format(dstruct_name)
-    #     dstruct_str += '{\n'
-    #     # Write deallocate memory.
-    #     for name, desc in self.required_datastructs.items():
-    #         # Skip names reserved for Butcher table entries.
-    #         if name in ('A', 'b', 'c'):
-    #             continue
-    #         # Skip names reserved for pre-defined variables.
-    #         if name in ('h', 't', 'g', 'y'):
-    #             continue
-    #         if desc.struct_type == DatastructType.array1D:
-    #             dstruct_str += 'delete1d({});\n'.format(name)
-    #         elif desc.struct_type == DatastructType.array2D:
-    #             dstruct_str += 'delete2d({}, {});\n'.format(name, desc.size[0])
-    #         elif desc.struct_type == DatastructType.array3D:
-    #             dstruct_str += 'delete3d({}, {}, {});\n'.format(name, desc.size[0], desc.size[1])
-    #         else:
-    #             assert False
-    #     dstruct_str += '}\n'
-    #     # End class.
-    #     dstruct_str += '};'
-    #     # Write to file.
-    #     path = Path('{}/DS_{}.hpp'.format(self.folder, skeleton))
-    #     with path.open('w') as file_handle:
-    #         file_handle.write(dstruct_str)
-    #     # Format code with indent tool if available.
-    #     format_codefile(path)
 
     def write_class(self, variant_name: str, variant_id: int, method_name: str, step_code: str) -> str:
         """Write class.
@@ -724,7 +630,7 @@ class ImplCodeGeneratorCpp:
             if name in ('h', 't', 'g', 'y'):
                 continue
             class_str = sub(r'\b{}\b'.format(name), 'ds->{}'.format(name), class_str)
-        class_str = sub(r'\by\b', 'ode->y'.format(name), class_str)
+        class_str = sub(r'\by\b', 'ode->y', class_str)
         return class_str + '\n'
 
     @staticmethod
@@ -733,7 +639,7 @@ class ImplCodeGeneratorCpp:
 
         Parameters:
         -----------
-        generated_files : dict (key=Path, value=str)
+        generated_files: dict (key=Path, value=str)
             Generated implementation variant codes and their associated file paths.
 
         Returns:

@@ -8,9 +8,8 @@ computations:
 variants:
   - name: ys_RHS_predictor_jl
     code: |
-      %LOOP_START i s unroll 0 assign 0
-        %COMP A
-      %LOOP_END i
+        %LOOP i s unroll 0 assign 0
+            %COMP A
     pmodel :
       - working sets: { "2*s*n+s" }
 codegen:

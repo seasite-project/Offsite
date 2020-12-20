@@ -7,9 +7,10 @@ from re import sub
 from shlex import split as shlex_split
 from shutil import which
 from subprocess import run, PIPE, CalledProcessError
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import offsite.config
+from offsite.config import Config
 from offsite.evaluation.math_utils import eval_math_expr
 
 # Indention used for code formatting.
@@ -32,7 +33,7 @@ def indent(lvl: int) -> str:
     return INDENTION * lvl
 
 
-def eval_loop_boundary(boundary: str, constants: List[Tuple[str, float]]):
+def eval_loop_boundary(boundary: str, constants: Optional[List[Tuple[str, Union[str, float, int]]]]) -> str:
     """Evaluate loop boundary expression.
 
     Parameters:
@@ -55,7 +56,7 @@ def eval_loop_boundary(boundary: str, constants: List[Tuple[str, float]]):
     return str(boundary)
 
 
-def replace_var_with_factor(var: str, computation: str, factor: str):
+def replace_var_with_factor(var: str, computation: str, factor: str) -> str:
     """Replace loop variable term with an integer term.
 
     Parameters:
@@ -75,8 +76,8 @@ def replace_var_with_factor(var: str, computation: str, factor: str):
     return computation.replace('[' + var + ']', '[' + str(factor) + ']')
 
 
-def replace_incr_with_assign_op(computation: str):
-    """Replace increment expresssion statements with an assignment statement.
+def replace_incr_with_assign_op(computation: str) -> str:
+    """Replace increment expression statements with an assignment statement.
 
     Parameters:
     -----------
@@ -91,7 +92,8 @@ def replace_incr_with_assign_op(computation: str):
     return sub(r'(\+=|-)', '=', computation)
 
 
-def substitute_rhs_call(computation: str, component: str, constants: List[Tuple[str, str]]) -> str:
+def substitute_rhs_call(computation: str, component: str, input_vector: str,
+                        constants: Optional[List[Tuple[str, Union[str, float, int]]]]) -> str:
     """Substitute all RHS calls of the given computation code with the passed IVP component.
 
     Parameters:
@@ -99,7 +101,9 @@ def substitute_rhs_call(computation: str, component: str, constants: List[Tuple[
     computation: str
         Code that contains one or more RHS calls.
     component: str
-        IVP component to replace RHS calls.
+        IVP component used to replace RHS calls.
+    input_vector: str
+        Input vector used in RHS call.
     constants: list of Tuple (str, str)
         Constants of the IVP.
 
@@ -109,10 +113,10 @@ def substitute_rhs_call(computation: str, component: str, constants: List[Tuple[
         Code with substituted RHS calls.
     """
     assert '%RHS' in computation
-    config = offsite.config.offsiteConfig
+    config: Config = offsite.config.offsiteConfig
     component = component.strip()
     # Substitute %in keyword with the variable name defined in the given config.
-    component = component.replace("%in", config.ode_solution_vector)
+    component = component.replace("%in", input_vector)
     # Replace index keyword %idx and %last_idx with the variable names defined in the given config.
     component = component.replace('%idx', config.var_idx)
     component = component.replace('%last_idx', config.var_last_idx)
@@ -162,8 +166,8 @@ def substitute_rhs_func(computation: str, rhs_func: str, input_vector: str, butc
     return computation
 
 
-def substitute_stencil_call(computation: str, constants: List[Tuple[str, str]], input_vector: str, butcher_node: str,
-                            stencil_path: str) -> str:
+def substitute_stencil_call(computation: str, constants: Optional[List[Tuple[str, Union[str, float, int]]]],
+                            input_vector: str, butcher_node: str, stencil_path: str) -> str:
     """Substitute all RHS calls of the given computation code with a Yasksite-style stencil call.
 
     Parameters:
@@ -206,7 +210,7 @@ def write_closing_bracket(indent_lvl: int) -> str:
 
     Returns:
     --------
-    list of str
+    str
         Written closing bracket code line.
     """
     return indent(indent_lvl) + '}' + '\n'
@@ -224,16 +228,16 @@ def write_tiling_loop(block_varname: str, indent_lvl: int) -> str:
 
     Returns:
     --------
-    list of str
+    str
         Written tiling loop code line.
     """
     bs_var = 'bs_{}'.format(block_varname)
     limit_var = 'limit_{}'.format(block_varname)
-    B_var = 'B_{}'.format(block_varname)
+    block_var = 'B_{}'.format(block_varname)
     #
     loop = indent(indent_lvl) + 'int {}, {};\n'.format(bs_var, limit_var)
-    loop += indent(indent_lvl) + 'for (int jj=first, {0}=imin({1}, last-first+1), '.format(bs_var, B_var)
-    loop += '{0}=imax(first, last+1-{1}); jj<=last; {2}=last+1-jj, {0}=last)\n'.format(limit_var, B_var, bs_var)
+    loop += indent(indent_lvl) + 'for (int jj=first, {0}=imin({1}, last-first+1), '.format(bs_var, block_var)
+    loop += '{0}=imax(first, last+1-{1}); jj<=last; {2}=last+1-jj, {0}=last)\n'.format(limit_var, block_var, bs_var)
     loop += indent(indent_lvl) + '{\n'
     indent_lvl += 1
     loop += indent(indent_lvl) + 'for (; jj <= {}; jj += {})'.format(limit_var, bs_var)
@@ -241,7 +245,7 @@ def write_tiling_loop(block_varname: str, indent_lvl: int) -> str:
     return loop
 
 
-def write_instrument_kernel_start(indent_lvl: int):
+def write_instrument_kernel_start(indent_lvl: int) -> str:
     """Write instrumentation code that would be run before kernel execution.
 
     Parameters:
@@ -251,7 +255,7 @@ def write_instrument_kernel_start(indent_lvl: int):
 
     Returns:
     --------
-    list of str
+    str
         Written instrumentation code.
     """
     # Write code to instrument the kernel code.
@@ -269,7 +273,7 @@ def write_instrument_kernel_start(indent_lvl: int):
     return instr_start
 
 
-def write_instrument_kernel_end(indent_lvl: int, kernel_id: int):
+def write_instrument_kernel_end(indent_lvl: int, kernel_id: int) -> str:
     """Write instrumentation code that would be run after kernel execution.
 
     Parameters:
@@ -281,7 +285,7 @@ def write_instrument_kernel_end(indent_lvl: int, kernel_id: int):
 
     Returns:
     --------
-    list of str
+    str
         Written instrumentation code.
     """
     # Write code to instrument the kernel code.
@@ -308,14 +312,14 @@ def write_instrument_kernel_end(indent_lvl: int, kernel_id: int):
     return instr_end
 
 
-def create_variantname(variant: List['Kernel'], skeleton: str) -> str:
+def create_variant_name(variant: List['Kernel'], skeleton: str) -> str:
     """Create filename of an implementation variant.
 
     Parameters:
     -----------
     variant: list of Kernel
         Kernels associated with this implementation variant.
-    skelelton: str
+    skeleton: str
         Name of the associated ImplSkeleton.
 
     Returns:
@@ -346,19 +350,19 @@ def format_codefile(path: Path):
             raise RuntimeWarning('Formatting file {} with indent failed: {}'.format(path, error))
 
 
-def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[str]:
+def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[Path]:
     """Write codes to file.
 
     Parameters:
     -----------
     codes: dict (key=str, val=str)
         Code strings (val) and their associated file names (key).
-    folder : Path
+    folder: Path
         Relative path to folder that will contain the written code files.
 
     Returns:
     --------
-    list of str
+    list of Path
         Written code files.
     """
     # Create folder if it does not yet exist.
@@ -366,7 +370,7 @@ def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[str]:
     if folder and not folder.exists():
         folder.mkdir(parents=True)
     # Write code to file.
-    written_files = list()
+    written_files: List[Path] = list()
     for filename, code in codes.items():
         path = Path('{}.c'.format(filename))
         if folder:

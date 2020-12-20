@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
-from offsite.config import ModelToolType
+from offsite.config import Config, ModelToolType
 from offsite.db.db import METADATA
 from offsite.db.db import insert
 from offsite.descriptions.parser_utils import load_yaml, deserialize_obj, serialize_obj, ComponentDict, ConstantDict
@@ -26,25 +26,25 @@ class IVP:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this IVP object.
-    gridSize : str
-        Arithmetic expression that describes the IVP's grid size.
-    characteristic : IVPCharacteristic
+    gridSize: str
+        Arithmetic expression that describes the grid dimension size of the IVP.
+    characteristic: IVPCharacteristic
         Characteristics describing the shape of this IVP object.
-    components : list of IVPComponent
+    components: list of IVPComponent
         List of components connected to this IVP object.
-    constants : list of IVPConstant
+    constants: list of IVPConstant
         List of constants connected to this IVP object.
-    code_eval_range : str
+    code_eval_range: str
         DSL representation of the IVP function eval_range.
-    code_eval_component : str
+    code_eval_component: str
         DSL representation of the IVP function eval_component.
-    code_initial_values : str
+    code_initial_values: str
         DSL representation of the IVP function initial_values.
-    modelTool : ModelToolType
+    modelTool: ModelToolType
         Performance model tool used to obtain performance data of this object.
-    db_id : int
+    db_id: int
         ID of associated IVP table record in the database.
     """
     name = attr.ib(type=str)
@@ -98,7 +98,7 @@ class IVP:
         IVP
             Created IVP object.
         """
-        config = offsite.config.offsiteConfig
+        config: Config = offsite.config.offsiteConfig
         # Load YAML data.
         yaml = load_yaml(yaml_path)
         # Attribute name.
@@ -120,6 +120,8 @@ class IVP:
         components = ComponentDict.from_data(yaml['components'])
         # Attribute constants.
         constants = ConstantDict.from_data(yaml['constants'])
+        # Attributes code generation.
+
         if model_tool == ModelToolType.KERNCRAFT:
             # Attribute code_eval_range.
             code_eval_range = yaml['codegen']['eval_range']
@@ -134,12 +136,14 @@ class IVP:
             # Check if path exists.
             if 'YASKSITE_STENCIL_DIR' in code_stencil_path:
                 resolved_path = Path(code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
-            if not resolved_path.exists():
-                raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(name, resolved_path))
+                if not resolved_path.exists():
+                    raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(name, resolved_path))
             # Add empty string for unused codegen properties.
             code_eval_range = ''
             code_eval_component = ''
             code_required_indices = ''
+        else:
+            assert False
         # Attribute code_initial_values.
         code_initial_values = yaml['codegen']['initial_values']
         # Create object.
@@ -152,9 +156,9 @@ class IVP:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        ivp_name : str
+        ivp_name: str
             Name of the IVP, which is used as primary key in the database.
 
         Returns:
@@ -163,7 +167,7 @@ class IVP:
             Created IVP object.
         """
         try:
-            ivp = db_session.query(IVP).filter(IVP.name.like(ivp_name)).one()
+            ivp: IVP = db_session.query(IVP).filter(IVP.name.like(ivp_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load IVP object from database!')
         except MultipleResultsFound:
@@ -204,7 +208,7 @@ class IVP:
         yaml = self.characteristic
         self.characteristic = IVPCharacteristic.from_yaml(yaml, self)
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'IVP':
         """Push this IVP object to the database.
 
         Parameters:
@@ -218,7 +222,7 @@ class IVP:
             Instance of this object connected to database session.
         """
         # Check if database already contains this IVP object.
-        ivp = db_session.query(IVP).filter(IVP.name.like(self.name)).one_or_none()
+        ivp: IVP = db_session.query(IVP).filter(IVP.name.like(self.name)).one_or_none()
         if ivp:
             # Supplement attributes not saved in database.
             # IVPComponent objects.
@@ -240,7 +244,7 @@ class IVP:
             ivp.components_serial = serialize_obj(ivp.components)
             ivp.constants_serial = serialize_obj(ivp.constants)
             ivp.code_eval_range_serial = serialize_obj(ivp.code_eval_range)
-            ivp.code_eval_component_serial = serialize_obj(ivp.code_eval_component_serial)
+            ivp.code_eval_component_serial = serialize_obj(ivp.code_eval_component)
             ivp.code_initial_values_serial = serialize_obj(ivp.code_initial_values)
             ivp.code_required_indices_serial = serialize_obj(ivp.code_required_indices)
             return ivp
@@ -260,7 +264,7 @@ class IVP:
         return self
 
     def ivp_size(self) -> str:
-        """IVP size as a function of the IVP's grid size.
+        """IVP size as a function of the grid dimension size of the IVP.
 
         Parameters:
         -----------
@@ -269,19 +273,19 @@ class IVP:
         Returns:
         --------
         - str
-            Arithmetic expression that describes the IVP's size.
+            Arithmetic expression that describes the system size of the IVP.
         """
         return str(solve_equation('g', self.gridSize, 'n')[0])
 
     @staticmethod
-    def database_id(db_session: Session, yaml_path: str) -> int:
+    def database_id(db_session: Session, yaml_path: Path) -> int:
         """Return database ID ob an IVP object given by its YAML description.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        yaml_path : str
+        yaml_path: str
             Relative path to this object's YAML file.
 
         Returns:
@@ -290,7 +294,7 @@ class IVP:
             Database ID of IVP or -1 if not in database.
         """
         # Parse IVP yaml description.
-        ivp = IVP.from_yaml(yaml_path)
+        ivp: IVP = IVP.from_yaml(yaml_path)
         # Query IVP in database.
         ivp = db_session.query(IVP).filter(IVP.name.like(ivp.name)).one_or_none()
         # Return ID of IVP object.
@@ -312,15 +316,15 @@ class IVPCharacteristic:
 
     Attributes:
     -----------
-    ivp : IVP
+    ivp: IVP
         Reference to associated IVP object.
-    isSparse : bool
+    isSparse: bool
         True if referenced IVP is a sparse problem.
-    isStencil : bool
+    isStencil: bool
         True if referenced IVP is a stencil-like problem.
-    computationType : IVPComputationType
+    computationType: IVPComputationType
         Computation
-    db_id : int
+    db_id: int
          ID of associated IVPCharacteristic table record in the database.
      """
     ivp = attr.ib(type=IVP)
@@ -328,9 +332,9 @@ class IVPCharacteristic:
     isStencil = attr.ib(type=bool)
     access_distance = attr.ib(type=str)
     computationType = attr.ib(type=IVPComputationType, default=IVPComputationType.UNKNOWN)
-    stencil_radius = attr.ib(type=Integer, default=None)
-    stencil_dim = attr.ib(type=Integer, default=None)
-    ivp_db_id = attr.ib(type=Integer, init=False)
+    stencil_radius = attr.ib(type=int, default=None)
+    stencil_dim = attr.ib(type=int, default=None)
+    ivp_db_id = attr.ib(type=int, init=False)
     db_id = attr.ib(type=int, init=False)
 
     # Database information.
@@ -354,9 +358,9 @@ class IVPCharacteristic:
 
         Parameters:
         -----------
-        yaml : str
+        yaml: str
             YAML object describing this object.
-        ivp : IVP
+        ivp: IVP
             Reference to associated IVP object.
 
         Returns:
@@ -386,8 +390,8 @@ class IVPCharacteristic:
                     break
         assert access_distance is not None
         # Stencil-specific attributes.
-        stencil_radius = None
-        stencil_dim = None
+        stencil_radius = -1
+        stencil_dim = -1
         if is_stencil:
             for entry in yaml:
                 if isinstance(entry, dict):
@@ -397,9 +401,9 @@ class IVPCharacteristic:
                     # Attribute stencil_radius.
                     elif 'stencil_radius' in entry:
                         stencil_radius = int(entry['stencil_radius'])
-            if not stencil_dim:
+            if stencil_dim == -1:
                 raise RuntimeError('Stencil-like IVP \'{}\' requires attribute \'stencil_dim\''.format(ivp.name))
-            if not stencil_radius:
+            if stencil_radius == -1:
                 raise RuntimeError('Stencil-like IVP \'{}\' requires attribute \'stencil_radius\''.format(ivp.name))
         # Create object.
         return cls(ivp, is_sparse, is_stencil, access_distance, ctype, stencil_radius, stencil_dim)
@@ -410,9 +414,9 @@ class IVPCharacteristic:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        ivp_id : IVP
+        ivp_id: IVP
             Database ID of the associated IVP object.
 
         Returns:
@@ -421,7 +425,7 @@ class IVPCharacteristic:
             Created IVPCharacteristic object.
         """
         try:
-            ivp_characteristic = db_session.query(IVPCharacteristic).filter(
+            ivp_characteristic: IVPCharacteristic = db_session.query(IVPCharacteristic).filter(
                 IVPCharacteristic.ivp_db_id.like(ivp_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load IVPCharacteristic object from database!')
@@ -429,12 +433,12 @@ class IVPCharacteristic:
             raise RuntimeError('Unable to load IVPCharacteristic object from database!')
         return ivp_characteristic
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'IVPCharacteristic':
         """Push this IVPCharacteristic object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -443,7 +447,7 @@ class IVPCharacteristic:
             Instance of this object connected to database session.
         """
         # Check if database already contains this IVPCharacteristic object.
-        characteristic = db_session.query(IVPCharacteristic).filter(
+        characteristic: IVPCharacteristic = db_session.query(IVPCharacteristic).filter(
             IVPCharacteristic.ivp_db_id.is_(self.ivp_db_id)).one_or_none()
         if characteristic:
             # Supplement attributes not saved in database.

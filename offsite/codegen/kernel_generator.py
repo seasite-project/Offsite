@@ -3,16 +3,17 @@ Definition of class KernelCodeGenerator.
 """
 
 from copy import deepcopy
-from typing import Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import attr
 from sortedcontainers import SortedDict
 
 import offsite.config
-from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, LoopNode
 from offsite.codegen.codegen_util import eval_loop_boundary, substitute_rhs_func, write_closing_bracket, \
     write_tiling_loop
-from offsite.descriptions.kernel_template import Kernel
+from offsite.config import Config
+from offsite.descriptions.kernel_template import Kernel, KernelTemplate
 from offsite.descriptions.ode_method import ODEMethod
 from offsite.evaluation.math_utils import corrector_steps, stages
 
@@ -23,15 +24,15 @@ class KernelCodeGenerator:
 
     Attributes:
     -----------
-    unroll_stack : SortedDict
+    unroll_stack: SortedDict
         Stack of loops to be unrolled.
-    split_stack : dict (key=str, val=list of CodeNode)
+    split_stack: dict (key=str, val=list of CodeNode)
         Stack of loops to be split.
     """
     unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
     split_stack = attr.ib(type=dict, default=dict())
 
-    def collect_loop_meta_data(self, node: CodeNode, loop_splits: Dict[str, str] = None):
+    def collect_loop_meta_data(self, node: CodeNode, loop_splits: Optional[Dict[str, int]] = None):
         """Traverse tree depth first and collect all unroll and split tasks.
 
         Parameters:
@@ -46,6 +47,7 @@ class KernelCodeGenerator:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             # Collect unroll tasks.
             if node.optimize_unroll is not None:
                 if node.optimize_unroll in self.unroll_stack:
@@ -85,7 +87,7 @@ class KernelCodeGenerator:
                 break
             CodeTree.unroll_loop(self.unroll_stack.values()[0][0])
 
-    def generate(self, kernel: 'Kernel', method: 'ODEMethod', input_vector: str, gen_tiled_code: bool) -> str:
+    def generate(self, kernel: Kernel, method: ODEMethod, input_vector: str, gen_tiled_code: bool) -> str:
         """Generate kernel code for a particular Kernel object.
 
         Parameters:
@@ -105,7 +107,7 @@ class KernelCodeGenerator:
             Generated kernel code.
         """
         # Set some members to match current code generation.
-        code_tree = deepcopy(kernel.code_tree).root
+        code_tree: CodeNode = deepcopy(kernel.code_tree).root
 
         self.unroll_stack.clear()
         self.split_stack = dict()
@@ -113,7 +115,7 @@ class KernelCodeGenerator:
         # Generate kernel code tree.
         self.generate_kernel_tree(code_tree, kernel, method, input_vector)
         # Read loop split information from template.
-        loop_splits = dict()
+        loop_splits: Optional[Dict[str, int]] = dict()
         if 'loop splits' in kernel.template.codegen:
             for ls in kernel.template.codegen['loop splits']:
                 var, split_at = ls.split(' ')
@@ -132,16 +134,16 @@ class KernelCodeGenerator:
         # Substitute butcher table coefficients.
         CodeTree.substitute_butcher_coefficients(code_tree, method)
         #
+        rhs_func: Optional[str]
         if kernel.template.isIVPdependent:
             rhs_func = kernel.template.codegen['RHS'] if 'RHS' not in kernel.codegen else kernel.codegen['RHS']
         else:
             rhs_func = None
         # Generate code from tree and write to string.
-        code = self.generate_kernel_code(code_tree, gen_tiled_code, rhs_func)
-        return code
+        return self.generate_kernel_code(code_tree, gen_tiled_code, rhs_func)
 
     @staticmethod
-    def generate_kernel_tree(node: CodeNode, kernel: 'Kernel', method: 'ODEMethod', input_vector: str):
+    def generate_kernel_tree(node: CodeNode, kernel: Kernel, method: ODEMethod, input_vector: str):
         """Generate yasksite code tree.
 
         Parameters:
@@ -161,18 +163,18 @@ class KernelCodeGenerator:
         """
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            constants = [corrector_steps(method), stages(method)]
+            constants: Optional[List[Tuple[str, Union[str, float, int]]]] = [corrector_steps(method), stages(method)]
             node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.COMPUTATION:
-            template = kernel.template
+            template: KernelTemplate = kernel.template
             # Substitute computation.
             node.computation = template.computations[node.computation].computation
             # Check if computation includes RHS calls.
             if '%RHS' in node.computation:
                 assert ('RHS' in template.codegen or 'RHS' in kernel.codegen)
                 assert 'RHS_butcher_nodes' in template.codegen
-                rhs_func = template.codegen['RHS'] if 'RHS' not in kernel.codegen else kernel.codegen['RHS']
-                butcher_node = template.codegen['RHS_butcher_nodes']
+                rhs_func: str = template.codegen['RHS'] if 'RHS' not in kernel.codegen else kernel.codegen['RHS']
+                butcher_node: str = template.codegen['RHS_butcher_nodes']
                 node.computation = substitute_rhs_func(node.computation, rhs_func, input_vector, butcher_node)
                 if rhs_func == 'eval_range':
                     node.parent.flag = True
@@ -188,8 +190,8 @@ class KernelCodeGenerator:
             KernelCodeGenerator.generate_kernel_tree(node.next, kernel, method, input_vector)
 
     @staticmethod
-    def generate_kernel_code(
-            node: CodeNode, gen_tiled_code: bool, rhs_func: str = None, kernel_name: str = '', code: str = ''):
+    def generate_kernel_code(node: CodeNode, gen_tiled_code: bool, rhs_func: Optional[str] = None,
+                             kernel_name: str = '', code: str = ''):
         """Write kernel code.
 
         Parameters:
@@ -210,9 +212,10 @@ class KernelCodeGenerator:
         str
             Generated kernel code.
         """
-        config = offsite.config.offsiteConfig
+        config: Config = offsite.config.offsiteConfig
         loop_skipped = False
         if node.type == CodeNodeType.LOOP and node.var == config.var_idx:
+            node: LoopNode
             if node.flag:
                 # Loop is replaced by RHS eval_range call and can thus be skipped.
                 loop_skipped = True

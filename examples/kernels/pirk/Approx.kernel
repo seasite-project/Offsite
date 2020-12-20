@@ -8,23 +8,19 @@ computations:
 variants:
   - name: Approx_ij
     code: |
-      %PRAGMA nounroll_and_jam
-      %LOOP_START i s
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %COMP A
-      %LOOP_END j
-      %LOOP_END i
+        %PRAGMA nounroll_and_jam
+        %LOOP i s
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP A
     pmodel:
       - working sets: { "(s+1)*n+s", "2*n" }
   - name: Approx_ji
     code: |
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %LOOP_START i s unroll
-      %COMP A
-      %LOOP_END i
-      %LOOP_END j
+        %PRAGMA ivdep
+        %LOOP j n
+            %LOOP i s unroll
+                %COMP A
     pmodel:
       - working sets: { "(s+1)*n+s" }
 codegen:

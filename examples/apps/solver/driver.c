@@ -199,10 +199,9 @@ int main()
 
   show_completion();
 
-#ifndef INSTRUMENT
 #ifdef BENCHMARK
-  printf("%d\t%.20e\t%.20e\t%.20e\t%e\t%e\t%e\n",
-         steps, hmin, hmax, hsum / (double) steps, T, tps, tpcs);
+  printf("%s\t%d\t%.20e\t%.20e\t%.20e\t%e\t%e\t%e\n",
+         VARIANT_NAME, steps, hmin, hmax, hsum / (double) steps, T, tps, tpcs);
 #else
   printf("\n");
   printf("steps = %d\n", steps);
@@ -214,7 +213,6 @@ int main()
   printf("time  = %.3e s\n", T);
   printf("tps   = %.3e s\n", tps);
   printf("tpcs  = %.3e s\n", tpcs);
-#endif
 #endif
 
   free_data_structures();

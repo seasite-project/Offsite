@@ -2,7 +2,7 @@
 Definition of database functions.
 """
 
-from typing import List
+from typing import Any, List
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -15,7 +15,7 @@ def open_db(db_name: str) -> Session:
 
     Parameters:
     -----------
-    db_name : str
+    db_name: str
         Name of the used database.
 
     Returns:
@@ -41,7 +41,7 @@ def close(session: Session):
 
     Parameters:
     -----------
-    session : sqlalchemy.orm.session.Session
+    session: sqlalchemy.orm.session.Session
         Used database session.
 
     Returns:
@@ -56,7 +56,7 @@ def commit(session: Session):
 
     Parameters:
     -----------
-    session : sqlalchemy.orm.session.Session
+    session: sqlalchemy.orm.session.Session
         Used database session.
 
     Returns:
@@ -74,7 +74,7 @@ def rollback(session: Session):
 
     Parameters:
     -----------
-    session : sqlalchemy.orm.session.Session
+    session: sqlalchemy.orm.session.Session
         Used database session.
 
     Returns:
@@ -87,14 +87,14 @@ def rollback(session: Session):
         raise RuntimeError('Failed to rollback database changes!')
 
 
-def insert(session: Session, record: 'Object'):
+def insert(session: Session, record: Any):
     """Insert new data record into database.
 
     Parameters:
     -----------
-    session : sqlalchemy.orm.session.Session
+    session: sqlalchemy.orm.session.Session
         Used database session.
-    record : Object
+    record: Object
         Record to be inserted.
 
     Returns:
@@ -107,14 +107,14 @@ def insert(session: Session, record: 'Object'):
         raise RuntimeError('Failed to insert record into database!')
 
 
-def bulk_insert(session: Session, records: List['Object']):
+def bulk_insert(session: Session, records: List[Any]):
     """Insert new data record into database.
 
     Parameters:
     -----------
-    session : sqlalchemy.orm.session.Session
+    session: sqlalchemy.orm.session.Session
         Used database session.
-    record : Object
+    record: Object
         Record to be inserted.
 
     Returns:

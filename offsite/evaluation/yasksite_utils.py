@@ -5,9 +5,10 @@ Utility functions to use the yasksite tool.
 from os import environ
 from pathlib import Path
 from subprocess import run, PIPE, CalledProcessError
-from typing import Dict
+from typing import Dict, List
 
 import offsite.config
+from offsite.config import Config
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
@@ -24,17 +25,17 @@ def execute_yasksite(kernel: Path, machine: Machine, model: str, size_str: str, 
         Relative path to the kernel file executed.
     machine: Machine.
         Machine the kernel code is run on.
-    model : str
+    model: str
         Name of the yasksite mode used.
-    size_str : str
+    size_str: str
         TODO DOC
-    timesteps : str
+    timesteps: str
         DOC
-    radius : str
+    radius: str
         DOC
-    optimization_parameters : dict (key=str, value=str)
+    optimization_parameters: dict (key=str, value=str)
         DOC
-    stencil_file_path : str
+    stencil_file_path: str
         DOC
 
     Returns:
@@ -67,7 +68,7 @@ def execute_yasksite_ecm_mode(kernel: Path, machine: Machine, method: ODEMethod,
 
     Parameters:
     -----------
-    kernel : pathlib.Path
+    kernel: pathlib.Path
         Relative path to the kernel file executed.
     machine: Machine
         Trained machine.
@@ -75,9 +76,9 @@ def execute_yasksite_ecm_mode(kernel: Path, machine: Machine, method: ODEMethod,
         Trained ODE method.
     ivp: IVP
         Trained IVP.
-    iterations : integer
+    iterations: integer
         Number of iterations executed by the kernel.
-    optimization_parameters : dict (key=str, value=str)
+    optimization_parameters: dict (key=str, value=str)
         Applied YaskSite optimization parameters.
 
     Returns:
@@ -85,10 +86,12 @@ def execute_yasksite_ecm_mode(kernel: Path, machine: Machine, method: ODEMethod,
     str
         Output of the yasksite tool.
     """
-    config = offsite.config.offsiteConfig
+    config: Config = offsite.config.offsiteConfig
+
     size = ""
     timesteps = 1
     radius = str(-1)
+    stencil_path = ''
     if method:
         size = str(iterations) + ':1'
         timesteps = str(method.correctorSteps)
@@ -104,14 +107,15 @@ def execute_yasksite_ecm_mode(kernel: Path, machine: Machine, method: ODEMethod,
         radius = str(ivp.characteristic.stencil_radius)
         # Yasksite stencil file path.
         # ... substitute stencil directory variable.
-        if 'YASKSITE_STENCIL_DIR' in ivp.code_stencil_path:
-            resolved_path = Path(ivp.code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
+        if 'YASKSITE_STENCIL_DIR' not in ivp.code_stencil_path:
+            raise RuntimeError('Stencil file of IVP \'{}\' missing.'.format(ivp.name))
+        resolved_path = Path(ivp.code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
         # ... absolute path.
-        stencil_abs_path = resolved_path.resolve()
+        stencil_path = resolved_path.resolve()
         # ... check if path exists.
-        if not stencil_abs_path.exists():
-            raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(ivp.name, stencil_abs_path))
-    return execute_yasksite(kernel, machine, 'ECM', size, timesteps, radius, optimization_parameters, stencil_abs_path)
+        if not stencil_path.exists():
+            raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(ivp.name, stencil_path))
+    return execute_yasksite(kernel, machine, 'ECM', size, timesteps, radius, optimization_parameters, stencil_path)
 
 
 def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMethod, ivp: IVP, iterations: int,
@@ -120,7 +124,7 @@ def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMetho
 
     Parameters:
     -----------
-    kernel : pathlib.Path
+    kernel: pathlib.Path
         Relative path to the kernel file executed.
     machine: Machine
         Trained machine.
@@ -128,9 +132,9 @@ def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMetho
         Trained ODE method.
     ivp: IVP
         Trained IVP.
-    iterations : integer
+    iterations: integer
         Number of iterations executed by the kernel.
-    optimization_parameters : dict (key=str, value=str)
+    optimization_parameters: dict (key=str, value=str)
         Applied YaskSite optimization parameters.
 
     Returns:
@@ -138,10 +142,12 @@ def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMetho
     str
         Output of the yasksite tool.
     """
-    config = offsite.config.offsiteConfig
+    config: Config = offsite.config.offsiteConfig
+
     size = ""
     timesteps = 1
     radius = str(-1)
+    stencil_path = ''
     if method:
         size = str(iterations) + ':1'
         timesteps = str(method.correctorSteps)
@@ -157,15 +163,15 @@ def execute_yasksite_bench_mode(kernel: Path, machine: Machine, method: ODEMetho
         radius = str(ivp.characteristic.stencil_radius)
         # Yasksite stencil file path.
         # ... substitute stencil directory variable.
-        if 'YASKSITE_STENCIL_DIR' in ivp.code_stencil_path:
-            resolved_path = Path(ivp.code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
+        if 'YASKSITE_STENCIL_DIR' not in ivp.code_stencil_path:
+            raise RuntimeError('Stencil file of IVP \'{}\' missing.'.format(ivp.name))
+        resolved_path = Path(ivp.code_stencil_path.replace('YASKSITE_STENCIL_DIR', config.yasksite_stencil_dir))
         # ... absolute path.
-        stencil_abs_path = resolved_path.resolve()
+        stencil_path = resolved_path.resolve()
         # ... check if path exists.
-        if not stencil_abs_path.exists():
-            raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(ivp.name, stencil_abs_path))
-    return execute_yasksite(kernel, machine, 'BENCH', size, timesteps, radius, optimization_parameters,
-                            stencil_abs_path)
+        if not stencil_path.exists():
+            raise RuntimeError('Stencil file of IVP \'{}\' not found: \'{}\''.format(ivp.name, stencil_path))
+    return execute_yasksite(kernel, machine, 'BENCH', size, timesteps, radius, optimization_parameters, stencil_path)
 
 
 def parse_yasksite_output(output: str) -> Dict[int, float]:
@@ -182,8 +188,8 @@ def parse_yasksite_output(output: str) -> Dict[int, float]:
         ECM predictions obtained for different core counts (key: number of cores: value: prediction).
     """
     # Parse yasksite output.
-    cores = None
-    predictions = None
+    cores: List[int] = list()
+    predictions: List[float] = list()
     for line in output.splitlines(True):
         line = line.strip()
         if line.startswith('cores'):

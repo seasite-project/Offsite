@@ -1,34 +1,36 @@
 """@package kernel_template
 Definitions of classes KernelTemplate, Kernel and PModelKernel.
 """
+
 from copy import deepcopy
 from datetime import datetime
 from getpass import getuser
 from itertools import product
 from pathlib import Path
 from sys import maxsize as sys_maxsize
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import attr
-from lark import Lark
 from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
-from offsite.codegen.code_dsl import code_grammar
+from offsite.codegen.code_dsl import parse_lark_grammar
 from offsite.codegen.code_tree import CodeNode, CodeNodeType, CodeTree, CodeTreeGenerator
 from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.kerncraft_generator import KerncraftCodeGenerator
 from offsite.codegen.yasksite_generator import YasksiteCodeGenerator
+from offsite.config import Config
 from offsite.config import ModelToolType
 from offsite.db import METADATA
 from offsite.db.db import insert
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
-from offsite.descriptions.parser_utils import load_yaml, ComputationDict, DatastructDict, deserialize_obj, serialize_obj
+from offsite.descriptions.parser_utils import load_yaml, ComputationDict, DatastructDict, DatastructDesc, \
+    DatastructType, deserialize_obj, serialize_obj
 from offsite.evaluation.math_utils import eval_math_expr, solve_equation, cacheline_elements, corrector_steps, \
     ivp_grid_size, stages
 from offsite.evaluation.performance_model import SampleInterval, SamplePosition
@@ -43,27 +45,27 @@ class KernelTemplate:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    variants : list of Kernel
+    variants: list of Kernel
         Kernel variants of this template.
-    isIVPdependent : boolean
+    isIVPdependent: boolean
         If true this template contains IVP calls.
-    modelTool : ModelToolType
+    modelTool: ModelToolType
         Performance model tool used to obtain performance data of this object.
-    datastructs : dict
+    datastructs: dict
         Datastructs used by this object.
-    computations : dict
+    computations: dict
         Computations used by this object.
-    codegen : dict
+    codegen: dict
         Code generation parameters used to generate code of this object.
-    db_id : int
+    db_id: int
         ID of associated KernelTemplate database table record.
     """
     name = attr.ib(type=str)
     variants = attr.ib(type=List['Kernel'])
     isIVPdependent = attr.ib(type=bool)
-    modelTool = attr.ib(type=str)
+    modelTool = attr.ib(type=ModelToolType)
     datastructs = attr.ib(type=List[DatastructDict])
     computations = attr.ib(type=List[ComputationDict])
     codegen = attr.ib(type=Dict, default=dict())
@@ -92,7 +94,7 @@ class KernelTemplate:
 
         Parameters:
         -----------
-        yaml_path : Path
+        yaml_path: Path
             Relative path to this object's YAML file.
 
         Returns:
@@ -119,6 +121,12 @@ class KernelTemplate:
             assert False
         # Attribute datastructs.
         datastructs = DatastructDict.from_data(yaml['datastructs'])
+        # ... implicitly add additional datastructures required by IVP-dependent kernels.
+        if is_ivp_dependent and model_tool == ModelToolType.KERNCRAFT:
+            datastructs['h'] = DatastructDesc('double', DatastructType.scalar, '1', False)
+            datastructs['t'] = DatastructDesc('double', DatastructType.scalar, '1', False)
+            datastructs['g'] = DatastructDesc('double', DatastructType.scalar, '1', False)
+            datastructs['c'] = DatastructDesc('double', DatastructType.array1D, ['s'], False)
         # Attribute computations.
         computations = ComputationDict.from_data(yaml['computations'])
         # Attribute codegen.
@@ -138,9 +146,9 @@ class KernelTemplate:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        kernel_template_name : str
+        kernel_template_name: str
             Name of the kernel template, which is used as primary key in the database.
 
         Returns:
@@ -149,7 +157,7 @@ class KernelTemplate:
             Created KernelTemplate object.
         """
         try:
-            kernel_template = db_session.query(KernelTemplate).filter(
+            kernel_template: KernelTemplate = db_session.query(KernelTemplate).filter(
                 KernelTemplate.name.like(kernel_template_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load KernelTemplate object from database!')
@@ -202,7 +210,7 @@ class KernelTemplate:
                     variants.append(variant_copy)
             self.variants = variants
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'KernelTemplate':
         """Push this kernel template object to the database.
 
         Parameters:
@@ -216,7 +224,8 @@ class KernelTemplate:
             Instance of this object connected to database session.
         """
         # Check if database already contains this KernelTemplate object.
-        template = db_session.query(KernelTemplate).filter(KernelTemplate.name.like(self.name)).one_or_none()
+        template: KernelTemplate = db_session.query(
+            KernelTemplate).filter(KernelTemplate.name.like(self.name)).one_or_none()
         if template:
             # Supplement attributes not saved in database.
             template.datastructs = self.datastructs
@@ -250,19 +259,19 @@ class Kernel:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    template : KernelTemplate
+    template: KernelTemplate
         Reference to associated KernelTemplate object.
-    pmodel_kernels : list of PmodelKernel
+    pmodel_kernels: list of PmodelKernel
         PmodelKernel objects associated with this object.
-    code_tree : CodeTree
+    code_tree: CodeTree
         Tree representation of the kernel code.
-    codegen : dict
+    codegen: dict
         Code generation parameters used to generate code of this object.
-    optimization_parameters : dict (key=str, value=str)
+    optimization_parameters: dict (key=str, value=str)
         Applied YaskSite optimization parameters.
-    db_id : int
+    db_id: int
         ID of associated Kernel database table record.
     """
     name = attr.ib(type=str)
@@ -297,9 +306,9 @@ class Kernel:
 
         Parameters:
         -----------
-        yaml : dict
+        yaml: dict
             YAML object describing this object.
-        template : KernelTemplate
+        template: KernelTemplate
             Reference to associated KernelTemplate object.
 
         Returns:
@@ -310,9 +319,8 @@ class Kernel:
         # Attribute name.
         name = yaml['name']
         # Attribute code_tree.
-        parser = Lark(code_grammar, parser='lalr')
-        parsed_code = parser.parse(yaml['code'])
-        code_tree = CodeTreeGenerator().generate(parsed_code)
+        lark_code = parse_lark_grammar(yaml['code'])
+        code_tree = CodeTreeGenerator().generate(lark_code)
         code_tree = deepcopy(code_tree)
         # Attribute pmodel_kernels.
         # .. used to temporarily store yaml data for post init.
@@ -334,11 +342,11 @@ class Kernel:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        kernel_name : str
+        kernel_name: str
             Name of the kernel, which is used as primary key in the database.
-        template_id : IVP
+        template_id: IVP
             Database ID of the associated KernelTemplate object.
 
         Returns:
@@ -347,7 +355,7 @@ class Kernel:
             Created Kernel object.
         """
         try:
-            kernel = db_session.query(Kernel).filter(
+            kernel: Kernel = db_session.query(Kernel).filter(
                 Kernel.name.is_(kernel_name), Kernel.template_db_id.is_(kernel_template_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load Kernel object from database!')
@@ -394,7 +402,7 @@ class Kernel:
                 assert node is not None
                 self.pmodel_kernels.append(PModelKernel.from_yaml(pm_yaml, self, node, pm_yaml['name']))
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'Kernel':
         """Push this kernel object to the database.
 
         Parameters:
@@ -408,7 +416,7 @@ class Kernel:
             Instance of this object connected to database session.
         """
         # Check if database already contains this Kernel object.
-        kernel = db_session.query(Kernel).filter(
+        kernel: Kernel = db_session.query(Kernel).filter(
             Kernel.name.like(self.name), Kernel.template_db_id.is_(self.template_db_id)).one_or_none()
         if kernel:
             # Supplement attributes not saved in database.
@@ -440,7 +448,7 @@ class Kernel:
             pmodel.to_database(db_session)
         return self
 
-    def generate_pmodel_code(self, method: ODEMethod, ivp: IVP, system_size: int = None):
+    def generate_pmodel_code(self, method: ODEMethod, ivp: IVP, system_size: Optional[int] = None):
         """Generate code for all pmodel kernels associated with this object.
 
         For each PModelKernel, either a generalized version of the code or if required a specialised version (unrolled
@@ -565,7 +573,7 @@ class Kernel:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        kernel_id : int
+        kernel_id: int
             ID of the requested Kernel object.
 
         Returns:
@@ -573,7 +581,7 @@ class Kernel:
         Kernel
             Kernel object.
         """
-        data = db_session.query(Kernel).filter(Kernel.db_id.is_(kernel_id)).one()
+        data: Kernel = db_session.query(Kernel).filter(Kernel.db_id.is_(kernel_id)).one()
         return Kernel.from_database(db_session, data.name, data.template_db_id)
 
     @staticmethod
@@ -584,7 +592,7 @@ class Kernel:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        template : int
+        template: int
             ID of the used KernelTemplate object.
 
         Returns:
@@ -592,7 +600,7 @@ class Kernel:
         list of tuple of tuples (int, dict (key=str, value=str))
             Lists of tuples that contain a kernel ID and optimization parameters of a kernel.
         """
-        data = db_session.query(Kernel).filter(Kernel.template_db_id.is_(template)).all()
+        data: List[Kernel] = db_session.query(Kernel).filter(Kernel.template_db_id.is_(template)).all()
         return [(kernel.db_id, kernel.optimization_parameters) for kernel in data]
 
 
@@ -602,18 +610,18 @@ class PModelKernel:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name affix added to code file of this object.
-    kernel : Kernel
+    kernel: Kernel
         Reference to associated Kernel object.
-    iterations : str
+    iterations: str
         Arithmetic expression that describes this object's total iteration
         count.
-    workingSets : list of str
+    workingSets: list of str
         Working sets of this object.
-    code_path : Path
+    code_path: Path
         Relative path to generated code file.
-    db_id : int
+    db_id: int
        ID of associated PModelKernel database table record.
     """
     kernel = attr.ib(type=Kernel)
@@ -639,18 +647,18 @@ class PModelKernel:
                      sqlite_autoincrement=True)
 
     @classmethod
-    def from_yaml(cls, yaml: dict, kernel: Kernel, pmodel_node: CodeNode, name: str = '') -> 'PModelKernel':
+    def from_yaml(cls, yaml: Dict, kernel: Kernel, pmodel_node: CodeNode, name: str = '') -> 'PModelKernel':
         """Construct PModelKernel object from YAML definition.
 
         Parameters:
         -----------
-        yaml : dict
+        yaml: dict
             YAML object describing this object.
-        kernel : Kernel
+        kernel: Kernel
             Reference to associated Kernel object.
         pmodel_node: CodeNode
             Reference to associated CodeNode object.
-        name : str
+        name: str
             Name of this object.
 
         Returns:
@@ -659,6 +667,7 @@ class PModelKernel:
             Created PModelObject object.
         """
         # Attribute iterations.
+        iterations: str
         # Compute iteration count.
         if kernel.template.modelTool == ModelToolType.KERNCRAFT:
             if pmodel_node.type == CodeNodeType.PMODEL:
@@ -683,7 +692,7 @@ class PModelKernel:
         #
         iterations = eval_math_expr(iterations, cast_to=str)
         # Attribute working_sets.
-        working_sets = [ws for ws in yaml['working sets']]
+        working_sets: List[str] = [ws for ws in yaml['working sets']]
         # Create object.
         return cls(kernel, iterations, working_sets, name)
 
@@ -693,11 +702,11 @@ class PModelKernel:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        pmodel_name : str
+        pmodel_name: str
             Name of the pmodel kernel, which is used as primary key in the database.
-        kernel_id : IVP
+        kernel_id: IVP
             Database ID of the associated Kernels object.
 
         Returns:
@@ -706,7 +715,7 @@ class PModelKernel:
             Created PModelKernel object.
         """
         try:
-            pmodel_kernel = db_session.query(PModelKernel).filter(
+            pmodel_kernel: PModelKernel = db_session.query(PModelKernel).filter(
                 PModelKernel.name.like(pmodel_name), PModelKernel.kernel_db_id.like(kernel_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load PModelKernel object from database!')
@@ -716,12 +725,12 @@ class PModelKernel:
         pmodel_kernel.workingSets = [workset for workset in pmodel_kernel.working_sets_serial.split(',') if workset]
         return pmodel_kernel
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'PModelKernel':
         """Push this pmodel kernel object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -730,7 +739,7 @@ class PModelKernel:
             Instance of this object connected to database session.
         """
         # Check if database already contains this PModelKernel object.
-        pmodel = db_session.query(PModelKernel).filter(
+        pmodel: PModelKernel = db_session.query(PModelKernel).filter(
             PModelKernel.name.like(self.name), PModelKernel.kernel_db_id.is_(self.kernel_db_id)).one_or_none()
         if pmodel:
             # Supplement attributes not saved in database.
@@ -790,7 +799,7 @@ class PModelKernel:
         list of SampleInterval
             List of sample intervals.
         """
-        config = offsite.config.offsiteConfig
+        config: Config = offsite.config.offsiteConfig
         assert config.memory_lvl_sample_offset >= 1.0
         # Raise error if no working sets were defined.
         if not self.workingSets:
@@ -815,28 +824,57 @@ class PModelKernel:
             # Switch to next working set once the end of the last interval from the lower border region was reached.
             if end + 1 < start:
                 break
-            # Add median value of remaining range - the one that wasn't yet considered in the SampleInterval objects of
-            # the transition area of the working set as sample.
-            point = SampleInterval(start, end).median(ivp)
-            if point:
-                samples.append(SampleInterval(start, end, point))
-                # Switch to start of next working set.
-                wset_start = wset_end + 1
+            #
+            size = end - start + 1
+            step = int(size / config.samples_per_interval)
+            remain = size % config.samples_per_interval
+            #
+            if size >= 10 * config.samples_per_interval:  # TODO don't split too slow intervals
+                nothing_added = True
+                my_start = start
+                my_end = my_start + step
+                for i in range(1, config.samples_per_interval + 1):
+                    my_end = min(my_end + 1 + i if remain < i else my_end, end)
+                    #
+                    point = SampleInterval(my_start, my_end).median(ivp)
+                    if point:
+                        nothing_added = False
+                        #
+                        samples.append(SampleInterval(my_start, my_end, point))
+                        # Switch to next.
+                        my_start = my_end + 1
+                        my_end = my_start + step
+                    else:
+                        # Unable to determine sample point point for current interval. Hence, we increase the end
+                        # value.
+                        my_end = my_end + step
+                if nothing_added:
+                    # Unable to determine any sample point at all for the given interval! Hence, instead incorporate
+                    # current working set in next working set.
+                    wset_start = start
+                else:
+                    # Switch to start of next working set.
+                    wset_start = wset_end + 1
             else:
-                # Unable to determine sample point for the given interval! Hence, instead incorporate current working
-                # set in next working set.
-                wset_start = start
+                # Add median value of remaining range - the one that wasn't yet considered in the SampleInterval
+                # objects of the transition area of the working set as sample.
+                point = SampleInterval(start, end).median(ivp)
+                if point:
+                    samples.append(SampleInterval(start, end, point))
+                    # Switch to start of next working set.
+                    wset_start = wset_end + 1
+                else:
+                    # Unable to determine sample point for the given interval! Hence, instead incorporate current
+                    # working set in next working set.
+                    wset_start = start
         # Add samples in border region of data from memory and largest cache working set size.
         samples_border, start = create_samples_lower_border_working_set(
-            wset_end + 1, sys_maxsize, config.samples_per_border, config.step_between_border_samples, ivp)
+            wset_end + 1, sys_maxsize, config.samples_border_region_memory_lvl, config.step_between_border_samples, ivp)
         samples.extend(samples_border)
-        # Add sample for memory size.
-        point = SampleInterval(start, 2 * wset_end * config.memory_lvl_sample_offset).median(ivp)
-        if point:
-            samples.append(SampleInterval(start, sys_maxsize, point))
-        else:
-            raise ValueError('Failed to create sample interval in main memory range for PModelKernel {}{}!'.format(
-                self.kernel.name, self.name))
+        # Add samples in memory region.
+        samples.extend(
+            create_samples_memory_lvl(start, config.samples_memory_lvl, config.memory_lvl_sample_offset, ivp))
+        # Sort all samples
         samples.sort(key=lambda x: x.first)
         #
         if self.kernel.template.modelTool == ModelToolType.YASKSITE and ivp.characteristic.isStencil:
@@ -888,7 +926,7 @@ class PModelKernel:
 
         # For each cache level and working set permutation, determine the maximum IVP system size 'n' that still fits
         # into that level and working set.
-        max_ns = list()
+        max_ns: List[int] = list()
         for cache in [machine.l1CacheElements, machine.l2CacheElements, machine.l3CacheElements]:
             max_ns.extend(self.determine_max_n_of_working_sets_for_cache_lvl(machine, method, cache))
         # Sort working set ends by size to iterate list in order when creating the SampleInterval objects.
@@ -897,7 +935,7 @@ class PModelKernel:
 
     def determine_max_n_of_working_sets_for_cache_lvl(self, machine: Machine, method: ODEMethod, cache_elements: int):
         """
-        Determine the maximum syste size 'n' that still fit into the particular given cache level and working sets given
+        Determine the maximum system size 'n' that still fit into the particular given cache level and working sets given
         by the run configuration and this object.
 
         Parameters:
@@ -914,7 +952,7 @@ class PModelKernel:
         list of int
             Maximal system sizes fitting into the particular cache levels and working sets.
         """
-        avail_cache_size = offsite.config.offsiteConfig.available_cache_size
+        avail_cache_size: float = offsite.config.offsiteConfig.available_cache_size
         assert avail_cache_size <= 1.0
         # Define some constants that might be part of the arithmetical working set expressions.
         constants = [corrector_steps(method), stages(method), cacheline_elements(machine)]
@@ -922,7 +960,7 @@ class PModelKernel:
         max_ns = list()
         for wset in self.workingSets:
             # Solve equation 'wset = avail_cache * cache'.
-            solution = solve_equation(wset, '{}*{}'.format(avail_cache_size, cache_elements), 'n', constants)
+            solution: str = solve_equation(wset, '{}*{}'.format(avail_cache_size, cache_elements), 'n', constants)
             # Get end from the solution of the equation
             max_ns.append(int(solution[0]))
         return max_ns
@@ -934,15 +972,15 @@ def create_samples_lower_border_working_set(
 
     Parameters:
     -----------
-    wset_start : int
+    wset_start: int
         Smallest system size of the working set.
-    wset_end : int
+    wset_end: int
         Largest system size of the working set.
-    num_samples : int
+    num_samples: int
         Number of sample intervals created.
-    step : float
+    step: float
         Step between created sample intervals.
-    ivp : IVP
+    ivp: IVP
         Used IVP.
 
     Returns:
@@ -952,15 +990,15 @@ def create_samples_lower_border_working_set(
     int
         Highest system size above border region.
     """
-    samples = list()
+    samples: List[SampleInterval] = list()
     # Ignore lower border for first working set. Too low values!
-    start = wset_start
+    start: int = wset_start
     if start == 1:
         return samples, start
     # Create samples in border region to previous working set.
     for i in range(1, num_samples + 1):
-        end = min(int(wset_start * (1 + (i / step))), wset_end)
-        point = SampleInterval(start, end).median(ivp)
+        end: int = min(int(wset_start * (1 + (i / step))), wset_end)
+        point: int = SampleInterval(start, end).median(ivp)
         if point:
             samples.append(SampleInterval(start, end, point, SamplePosition.BORDER))
             # Switch to start of next interval.
@@ -977,15 +1015,15 @@ def create_samples_upper_border_working_set(
 
     Parameters:
     -----------
-    wset_start : int
+    wset_start: int
         Smallest system size of the working set.
-    wset_end : int
+    wset_end: int
         Largest system size of the working set.
-    num_samples : int
+    num_samples: int
         Number of sample intervals created.
-    step : float
+    step: float
         Step between created sample intervals.
-    ivp : IVP
+    ivp: IVP
         Used IVP.
 
     Returns:
@@ -995,12 +1033,12 @@ def create_samples_upper_border_working_set(
     int
         Highest system size below border region.
     """
-    samples = list()
-    end = wset_end
+    samples: List[SampleInterval] = list()
+    end: int = wset_end
     # Create samples in border region to next working set.
     for i in range(1, num_samples + 1):
-        start = max(int(wset_end * (1 - (i / step))), wset_start)
-        point = SampleInterval(start, end).median(ivp)
+        start: int = max(int(wset_end * (1 - (i / step))), wset_start)
+        point: int = SampleInterval(start, end).median(ivp)
         if point:
             samples.append(SampleInterval(start, end, point, SamplePosition.BORDER))
             # Switch to end of previous interval.
@@ -1009,3 +1047,47 @@ def create_samples_upper_border_working_set(
         if start < wset_start:
             break
     return samples, end
+
+
+def create_samples_memory_lvl(
+        start: int, num_samples: int, sample_offset: int, ivp: Optional[IVP] = None) -> List[SampleInterval]:
+    """Create sample intervals and points in the memory level region.
+
+    Parameters:
+    -----------
+    start: int
+        Smallest system size in the memory region.
+    num_samples: int
+        Number of samples created.
+    sample_offset: int
+        Offset between samples.
+    ivp: IVP
+        Used IVP.
+
+    Returns:
+    --------
+    list of SampleInterval
+        List of sample intervals.
+    """
+    config: Config
+    samples: List[SampleInterval] = list()
+    # Create samples in memory region.
+    intv_length: int = (start * sample_offset) - start + 1
+    for _ in range(1, num_samples):
+        # Determine end of sample interval.
+        end: int = start + intv_length
+        # Determine sample point.
+        point = SampleInterval(start, end).median(ivp)
+        if point:
+            samples.append(SampleInterval(start, end, point))
+        else:
+            raise ValueError('Failed to create sample interval in main memory range!')
+        # Switch to next sample.
+        start = end + 1
+    # Last sample in memory region.
+    point = SampleInterval(start, start + intv_length).median(ivp)
+    if point:
+        samples.append(SampleInterval(start, sys_maxsize, point))
+    else:
+        raise ValueError('Failed to create sample interval in main memory range!')
+    return samples

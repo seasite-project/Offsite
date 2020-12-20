@@ -1,9 +1,6 @@
 ivp_dependent: true
 datastructs:
-  - double t
-  - double g
-  - double c[s]
-  - double y[n]
+  - double Y[s][n]
   - double dy[n]
   - double b[s]
 computations:
@@ -11,22 +8,18 @@ computations:
 variants:
   - name : RHS_Approx_ij
     code: |
-      %LOOP_START i s
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %COMP A
-      %LOOP_END j
-      %LOOP_END i
+        %LOOP i s
+        %PRAGMA ivdep
+            %LOOP j n
+                %COMP A
     pmodel :
       - working sets: { "(s+1)*n+s", "2*n" }
   - name : RHS_Approx_ji
     code: |
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %LOOP_START i s unroll 0 assign 0
-      %COMP A
-      %LOOP_END i
-      %LOOP_END j
+        %PRAGMA ivdep
+        %LOOP j n
+            %LOOP i s unroll 0 assign 0
+                %COMP A
     pmodel :
       - working sets: { "(s+1)*n+s" }
 codegen:

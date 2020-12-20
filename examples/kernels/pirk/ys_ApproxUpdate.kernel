@@ -11,10 +11,9 @@ computations:
 variants:
   - name: ys_ApproxUpdate_ji
     code: |
-      %LOOP_START i s unroll 0 assign 0
-        %COMP A
-      %LOOP_END i
-      %COMP B
+        %LOOP i s unroll 0 assign 0
+            %COMP A
+        %COMP B
     pmodel :
       - working sets: { "(s+1)*n+s" }
 model_tool: yasksite

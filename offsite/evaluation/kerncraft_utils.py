@@ -4,10 +4,10 @@ Utility functions to use the kerncraft tool (https://github.com/RRZE-HPC/kerncra
 
 from pathlib import Path
 from subprocess import run, PIPE, STDOUT, CalledProcessError
-from sys import version_info
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import offsite.config
+from offsite.config import Config
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
@@ -33,7 +33,7 @@ def execute_kerncraft(kernel: Path, machine: Machine, model: str, defines: List[
     str
         Output of the kerncraft tool.
     """
-    config = offsite.config.offsiteConfig
+    config: Config = offsite.config.offsiteConfig
     # Kerncraft options.
     cmd = ['kerncraft', '-p', model, '-m', str(machine.path), '-i', config.args.incore.value]
     # Defines.
@@ -41,9 +41,7 @@ def execute_kerncraft(kernel: Path, machine: Machine, model: str, defines: List[
     # Kernel name
     cmd.append(str(kernel))
     try:
-        if version_info[1] > 5:
-            return run(cmd, check=True, encoding='utf-8', stdout=PIPE, stderr=STDOUT).stdout
-        return run(cmd, check=True, stdout=PIPE).stdout
+        return run(cmd, check=True, encoding='utf-8', stdout=PIPE, stderr=STDOUT).stdout
     except CalledProcessError as error:
         if model == 'LC':
             # TODO
@@ -166,11 +164,7 @@ def check_kerncraft_version():
     -
     """
     # Check kerncraft version.
-    if version_info[1] > 5:
-        kerncraft_version = run(['kerncraft', '--version'], check=True, encoding='utf-8', stdout=PIPE).stdout
-    else:
-        kerncraft_version = run(['kerncraft', '--version'], check=True, stderr=PIPE).stderr
-        kerncraft_version = kerncraft_version.decode("utf-8")
+    kerncraft_version = run(['kerncraft', '--version'], check=True, encoding='utf-8', stdout=PIPE).stdout
     # Split version number from kerncraft's version string.
     kerncraft_version_number = kerncraft_version.split(' ')[1].strip().split('.')
     # Split version number.
@@ -207,8 +201,8 @@ def parse_kerncraft_output_ecm_mode(output: str) -> Dict[int, float]:
     # Check kerncraft version.
     check_kerncraft_version()
     # Parse kerncraft output.
-    cores = None
-    predictions = None
+    cores: List[int] = list()
+    predictions: List[float] = list()
     for line in output.splitlines(True):
         line = line.strip()
         if line.startswith('cores'):
@@ -227,7 +221,7 @@ def parse_kerncraft_output_ecm_mode(output: str) -> Dict[int, float]:
     return results
 
 
-def parse_kerncraft_output_bench_mode(output: str) -> Dict[int, float]:
+def parse_kerncraft_output_bench_mode(output: str) -> float:
     """Parse output of kerncraft's benchmark mode and return the ECM results.
 
     Parameters:
@@ -237,8 +231,8 @@ def parse_kerncraft_output_bench_mode(output: str) -> Dict[int, float]:
 
     Returns:
     --------
-    dict(int, float)
-        ECM predictions obtained for different core counts (key: number of cores: value: prediction).
+    float
+        ECM prediction measured.
     """
     # Check kerncraft version.
     check_kerncraft_version()
@@ -254,7 +248,7 @@ def parse_kerncraft_output_bench_mode(output: str) -> Dict[int, float]:
     return ecm
 
 
-def parse_kerncraft_output_lc_mode(output: str) -> Dict[int, float]:
+def parse_kerncraft_output_lc_mode(output: str) -> Dict[str, List[Tuple[str, float]]]:
     """Parse output of kerncraft's lc (layer condition) mode and return the suggested values.
 
     Parameters:
@@ -270,7 +264,7 @@ def parse_kerncraft_output_lc_mode(output: str) -> Dict[int, float]:
     # Check kerncraft version.
     check_kerncraft_version()
     # Parse kerncraft output.
-    lcs = dict()
+    lcs: Dict[str, List[Tuple[str, float]]] = dict()
     cur_key = None
     for line in output.splitlines(True):
         line = line.strip()
@@ -286,6 +280,7 @@ def parse_kerncraft_output_lc_mode(output: str) -> Dict[int, float]:
         elif cur_key is None or not line or line.startswith('condition') or line.startswith('True'):
             continue
         else:
+            rhs: int
             if '<=' in line:
                 split = line.split('<=')
                 lhs = split[0].strip()

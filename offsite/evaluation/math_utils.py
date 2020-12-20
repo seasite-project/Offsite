@@ -2,7 +2,7 @@
 Util mathematical functions.
 """
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Union
 
 from numpy import polyfit, asarray
 from sympy import sympify, Symbol, solve
@@ -11,7 +11,7 @@ from offsite.descriptions.machine import Machine
 from offsite.descriptions.ode_method import ODEMethod
 
 
-def corrector_steps(method: ODEMethod) -> Tuple[str, str]:
+def corrector_steps(method: ODEMethod) -> Tuple[str, Union[str, int]]:
     """Return corrector steps variable.
 
     Parameters:
@@ -27,7 +27,7 @@ def corrector_steps(method: ODEMethod) -> Tuple[str, str]:
     return 'm', method.correctorSteps
 
 
-def stages(method: ODEMethod) -> Tuple[str, str]:
+def stages(method: ODEMethod) -> Tuple[str, Union[str, int]]:
     """Return stages variable.
 
     Parameters:
@@ -43,7 +43,7 @@ def stages(method: ODEMethod) -> Tuple[str, str]:
     return 's', method.stages
 
 
-def ivp_system_size(system_size: str) -> Tuple[str, str]:
+def ivp_system_size(system_size: Union[str,int]) -> Tuple[str, Union[str, int]]:
     """Return IVP system size variable.
 
     Parameters:
@@ -59,7 +59,7 @@ def ivp_system_size(system_size: str) -> Tuple[str, str]:
     return 'n', system_size
 
 
-def ivp_grid_size(grid_size) -> Tuple[str, str]:
+def ivp_grid_size(grid_size: Union[str,int]) -> Tuple[str, Union[str, int]]:
     """Return IVP grid size variable.
 
     Parameters:
@@ -75,12 +75,12 @@ def ivp_grid_size(grid_size) -> Tuple[str, str]:
     return 'g', grid_size
 
 
-def cacheline_elements(machine: Machine) -> Tuple[str, str]:
+def cacheline_elements(machine: Machine) -> Tuple[str, Union[str, int]]:
     """Return number of elements per cache line variable.
 
     Parameters:
     -----------
-    machine : Machine
+    machine: Machine
         Used machine.
 
     Returns:
@@ -91,7 +91,8 @@ def cacheline_elements(machine: Machine) -> Tuple[str, str]:
     return 'c', machine.elements_per_cacheline
 
 
-def eval_math_expr(expression: str, known_variables: List[Tuple[str, float]] = None, cast_to=None):
+def eval_math_expr(expression: Union[str,float,int],
+                   known_variables: Optional[List[Tuple[str, Union[str, float, int]]]] = None, cast_to=None):
     """Evaluate mathematical expression string and return its value.
 
     Parameters:
@@ -124,7 +125,8 @@ def eval_math_expr(expression: str, known_variables: List[Tuple[str, float]] = N
     return evaluated
 
 
-def solve_equation(lhs: str, rhs: str, unknown: str, known_variables: List[Tuple[str, float]] = None):
+def solve_equation(
+        lhs: str, rhs: str, unknown: str, known_variables: Optional[List[Tuple[str, Union[str, float, int]]]] = None):
     """Solve mathematical equation given as strings and return its solution.
 
     Parameters:
@@ -162,11 +164,11 @@ def interpolate_polynomial(x_coordinates: List[float], y_coordinates: List[float
 
     Parameters:
     -----------
-    x_coordinates : list of float
+    x_coordinates: list of float
         Known x-coordinates. Must be sorted in increasing order.
-    y_coordinates : list of float
+    y_coordinates: list of float
         Known y-coordinates.
-    degree : int
+    degree: int
         Degree of the fitting polynomial.
 
     Returns:
@@ -191,7 +193,7 @@ def remove_outliers(data: List[float]) -> List[float]:
 
     Parameters:
     -----------
-    data : list of float
+    data: list of float
         Data points with outliers.
 
     Returns:
@@ -218,9 +220,9 @@ def percent_deviation(observed_value: float, expected_value: float) -> float:
 
     Parameters:
     -----------
-    observed_value : float
+    observed_value: float
         Observed value.
-    expected_value : float
+    expected_value: float
         Expected value.
 
     Returns:

@@ -3,16 +3,16 @@ Definition of class YasksiteCodeGenerator.
 """
 
 from copy import deepcopy
-from typing import Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import attr
 from sortedcontainers import SortedDict
 
-from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, LoopNode
 from offsite.codegen.codegen_util import eval_loop_boundary, substitute_stencil_call
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.ode_method import ODEMethod
-from offsite.descriptions.parser_utils import DatastructType
+from offsite.descriptions.parser_utils import DatastructDict, DatastructType
 from offsite.evaluation.math_utils import corrector_steps, stages
 
 
@@ -22,7 +22,7 @@ class YasksiteCodeGenerator:
 
     Attributes:
     -----------
-    unroll_stack : SortedDict
+    unroll_stack: SortedDict
         Stack of loops to be unrolled.
     """
     unroll_stack = attr.ib(type=SortedDict, default=SortedDict())
@@ -40,6 +40,7 @@ class YasksiteCodeGenerator:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             if node.optimize_unroll is not None:
                 self.unroll_stack[node.optimize_unroll] = node
         # Traverse tree depth first.
@@ -67,7 +68,7 @@ class YasksiteCodeGenerator:
                 break
             CodeTree.unroll_loop(self.unroll_stack.values()[0])
 
-    def generate(self, kernel: 'Kernel', method: 'ODEMethod', ivp: 'IVP') -> Dict[str, str]:
+    def generate(self, kernel: 'Kernel', method: ODEMethod, ivp: IVP) -> Dict[str, str]:
         """Generate yasksite code for a particular Kernel object.
 
         Parameters:
@@ -85,7 +86,7 @@ class YasksiteCodeGenerator:
             Generated yasksite codes.
         """
         # Set some members to match current code generation.
-        code_tree = deepcopy(kernel.code_tree).root
+        code_tree: CodeNode = deepcopy(kernel.code_tree).root
         code_tree.name = kernel.name
 
         self.unroll_stack.clear()
@@ -99,20 +100,20 @@ class YasksiteCodeGenerator:
         # Substitute butcher table coefficients.
         CodeTree.substitute_butcher_coefficients(code_tree, method)
         # Generate code from tree and write to string.
-        codes = dict()
+        codes: Dict[str, str] = dict()
         if kernel.template.isIVPdependent:
             assert ivp.characteristic.isStencil
-            code_name = code_tree.name + '_{}'.format(ivp.name)
+            code_name: str = code_tree.name + '_{}'.format(ivp.name)
             codes[code_name] = self.generate_yasksite_code(code_tree)
         else:
             codes[code_tree.name] = self.generate_yasksite_code(code_tree)
         # Prepend variable definitions to written code.
-        var_defs = self.construct_variable_defs(kernel.template.datastructs, method)
-        codes = {name: var_defs + code for name, code in codes.items()}
+        var_defs: str = self.construct_variable_defs(kernel.template.datastructs, method)
+        codes: Dict[str, str] = {name: var_defs + code for name, code in codes.items()}
         return codes
 
     @staticmethod
-    def construct_variable_defs(datastructs: 'DatastructDict', method: 'ODEMethod') -> str:
+    def construct_variable_defs(datastructs: DatastructDict, method: ODEMethod) -> str:
         """Construct variable definitions.
 
         Parameters:
@@ -145,16 +146,17 @@ class YasksiteCodeGenerator:
             # Write variable definition.
             var_defs += '{} {}{};\n'.format(var_type, name, desc.dimensions_to_string_yasksite())
         # Replace ODE method constants.
-        corrector_steps_tup = corrector_steps(method)
+        corrector_steps_tup: Tuple[str, str] = corrector_steps(method)
         if '[{}]'.format(corrector_steps_tup[0]) in var_defs:
-            var_defs = var_defs.replace('[{}]'.format(corrector_steps_tup[0]), '[{}]'.format(corrector_steps_tup[1]))
+            var_defs: str = var_defs.replace('[{}]'.format(corrector_steps_tup[0]),
+                                             '[{}]'.format(corrector_steps_tup[1]))
         stages_tup = stages(method)
         if '[{}]'.format(stages_tup[0]) in var_defs:
-            var_defs = var_defs.replace('[{}]'.format(stages_tup[0]), '[{}]'.format(stages_tup[1]))
+            var_defs: str = var_defs.replace('[{}]'.format(stages_tup[0]), '[{}]'.format(stages_tup[1]))
         return var_defs + '\n'
 
     @staticmethod
-    def generate_yasksite_tree(node: CodeNode, template: 'KernelTemplate', method: 'ODEMethod', ivp: 'IVP'):
+    def generate_yasksite_tree(node: CodeNode, template: 'KernelTemplate', method: ODEMethod, ivp: IVP):
         """Generate yasksite code tree.
 
         Parameters:
@@ -174,7 +176,7 @@ class YasksiteCodeGenerator:
         """
         if node.type == CodeNodeType.LOOP:
             # Evaluate loop boundary expression.
-            constants = [corrector_steps(method), stages(method)]
+            constants: Optional[List[Tuple[str, Union[str, float, int]]]] = [corrector_steps(method), stages(method)]
             node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.COMPUTATION:
             # Substitute computation.

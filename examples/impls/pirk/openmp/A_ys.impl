@@ -1,11 +1,10 @@
 code: |
-  %KERNEL ys_RHS_predictor y
-  %LOOP_START k m
+    %KERNEL ys_RHS_predictor y
+    %LOOP k m
+        %COM omp_barrier
+        %KERNEL ys_LC
+        %COM omp_barrier
+        %KERNEL ys_RHS
     %COM omp_barrier
-    %KERNEL ys_LC
-    %COM omp_barrier
-    %KERNEL ys_RHS
-  %LOOP_END k
-  %COM omp_barrier
-  %KERNEL ys_Approx
-  %KERNEL ys_Update
+    %KERNEL ys_Approx
+    %KERNEL ys_Update

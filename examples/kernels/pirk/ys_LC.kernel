@@ -10,24 +10,19 @@ computations:
 variants:
   - name : ys_LC_jil
     code: |
-      %LOOP_START i s unroll 1 assign 0
-      %LOOP_START l s unroll 0
-        %COMP A
-      %LOOP_END l
-      %LOOP_END i
-      %LOOP_START l s unroll 2
-        %COMP B
-      %LOOP_END l
+        %LOOP i s unroll 1 assign 0
+            %LOOP l s unroll 0
+                %COMP A
+        %LOOP l s unroll 2
+            %COMP B
     pmodel :
       - working sets: { "(2*s+1)*n+s*s" }
   - name : ys_LC_jli
     code: |
-      %LOOP_START l s unroll 1 
-      %LOOP_START i s unroll 0 assign 0
-        %COMP A
-      %LOOP_END i
-        %COMP B
-      %LOOP_END l
+        %LOOP l s unroll 1
+            %LOOP i s unroll 0 assign 0
+                %COMP A
+            %COMP B
     pmodel :
       - working sets: { "(2*s+1)*n+s*s" }
 model_tool: yasksite

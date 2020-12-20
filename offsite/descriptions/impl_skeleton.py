@@ -6,16 +6,16 @@ from copy import deepcopy
 from datetime import datetime
 from getpass import getuser
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import attr
-from lark import Lark
+from pandas import DataFrame
 from sqlalchemy import Column, DateTime, Enum, Integer, String, Table
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
-from offsite.codegen.code_dsl import code_grammar
+from offsite.codegen.code_dsl import parse_lark_grammar
 from offsite.codegen.code_tree import CodeTree, CodeTreeGenerator
 from offsite.config import ModelToolType
 from offsite.db import METADATA
@@ -33,33 +33,27 @@ class ImplSkeleton:
 
     Attributes:
     -----------
-    name : str
+    name: str
         Name of this object.
-    code_tree : CodeTree
+    code_tree: CodeTree
         Tree representation of the kernel code.
     communicationOperations : dict
         Communication operations needed when executing a single iteration step.
-    loops : dict
-        Loops used in the implementation code.
-    kernels : dict
+    kernels: dict
         Kernels used in the implementation code.
     connected_templates : list
         List of KernelTemplate objects associated with this object.
-    db_id : int
+    db_id: int
         ID of associated ImplSkeleton database table record.
     """
     name = attr.ib(type=str)
     code_tree = attr.ib(type=CodeTree, hash=False)
     communicationOperations = attr.ib(type=Dict)
-    loops = attr.ib(type=Dict)
     kernels = attr.ib(type=Dict)
     connected_templates = attr.ib(type=List['KernelTemplate'])
     codegen = attr.ib(type=Dict, default=list())
     modelTool = attr.ib(type=str, default=ModelToolType.KERNCRAFT)
     isIVPdependent = attr.ib(type=bool, default=False)
-    communication_operations_serial = attr.ib(type=str, init=False)
-    loops_serial = attr.ib(type=str, init=False)
-    kernels_serial = attr.ib(type=str, init=False)
     connected_templates_ids = attr.ib(type=str, init=False)
     code_tree_serial = attr.ib(type=str, init=False)
     codegen_serial = attr.ib(type=str, init=False)
@@ -70,9 +64,6 @@ class ImplSkeleton:
                      Column('db_id', Integer, primary_key=True),
                      Column('name', String, unique=True),
                      Column('modelTool', Enum(ModelToolType)),
-                     Column('communication_operations_serial', String),
-                     Column('loops_serial', String),
-                     Column('kernels_serial', String),
                      Column('connected_templates_ids', String),
                      Column('code_tree_serial', String),
                      Column('codegen_serial', String),
@@ -87,9 +78,9 @@ class ImplSkeleton:
 
         Parameters:
         -----------
-        yaml_path : Path
+        yaml_path: Path
             Relative path to this object's YAML file.
-        kernel_templates : list of KernelTemplate
+        kernel_templates: list of KernelTemplate
             List of available KernelTemplate objects.
 
         Returns:
@@ -101,13 +92,18 @@ class ImplSkeleton:
         yaml = load_yaml(yaml_path)
         # Attribute name.
         name = yaml_path.stem
+        # add end
         # Attribute code_tree.
-        parser = Lark(code_grammar, parser='lalr')
-        parsed_code = parser.parse(yaml['code'])
-        code_tree = CodeTreeGenerator().generate(parsed_code)
+        lark_code = parse_lark_grammar(yaml['code'])
+        code_tree = CodeTreeGenerator().generate(lark_code)
         code_tree = deepcopy(code_tree)
-        # Parse code to garner attributes communication operations, loops and kernels.
-        communication_operations, loops, kernels = ImplSkeleton.parse_code(yaml['code'])
+        # Parse code tree to collect information for attributes communication_operations and kernels.
+        # .. communication operations.
+        communication_operations = dict()
+        communication_operations = CodeTree.count_communication(code_tree.root, communication_operations)
+        # .. kernels.
+        kernels = dict()
+        kernels = CodeTree.count_kernel(code_tree.root, kernels)
         # Attribute connected_templates.
         # .. used to temporarily store list of kernel templates for post init.
         connected_templates = kernel_templates
@@ -120,7 +116,7 @@ class ImplSkeleton:
                 else:
                     codegen[key] = value
         # Create object.
-        return cls(name, code_tree, communication_operations, loops, kernels, connected_templates, codegen)
+        return cls(name, code_tree, communication_operations, kernels, connected_templates, codegen)
 
     @classmethod
     def from_database(cls, db_session: Session, impl_skeleton_name: str,
@@ -129,11 +125,11 @@ class ImplSkeleton:
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impl_skeleton_name : str
+        impl_skeleton_name: str
             Name of the impl skeleton, which is used as primary key in the database.
-        kernel_templates : list of KernelTemplate
+        kernel_templates: list of KernelTemplate
             List of available KernelTemplate objects.
 
         Returns:
@@ -142,7 +138,8 @@ class ImplSkeleton:
             Created ImplSkeleton object.
         """
         try:
-            skeleton = db_session.query(ImplSkeleton).filter(ImplSkeleton.name.like(impl_skeleton_name)).one()
+            skeleton: ImplSkeleton = db_session.query(
+                ImplSkeleton).filter(ImplSkeleton.name.like(impl_skeleton_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load ImplSkeleton object from database!')
         except MultipleResultsFound:
@@ -150,11 +147,12 @@ class ImplSkeleton:
         # Attribute code_tree.
         skeleton.code_tree = deserialize_obj(skeleton.code_tree_serial)
         # Attribute communicationOperations.
-        skeleton.communicationOperations = deserialize_obj(skeleton.communication_operations_serial)
-        # Attribute loops.
-        skeleton.loops = deserialize_obj(skeleton.loops_serial)
+        communication_operations = dict()
+        skeleton.communicationOperations = CodeTree.count_communication(
+            skeleton.code_tree.root, communication_operations)
         # Attribute kernels.
-        skeleton.kernels = deserialize_obj(skeleton.kernels_serial)
+        kernels = dict()
+        skeleton.kernels = CodeTree.count_kernel(skeleton.code_tree.root, kernels)
         # Attribute connected_templates.
         skeleton.connected_templates = list()
         for name, executions in skeleton.kernels.items():
@@ -197,12 +195,12 @@ class ImplSkeleton:
             if self.modelTool == ModelToolType.KERNCRAFT and template[0].modelTool != ModelToolType.KERNCRAFT:
                 self.modelTool = template[0].modelTool
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'ImplSkeleton':
         """Push this impl skeleton object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -211,12 +209,9 @@ class ImplSkeleton:
             Instance of this object connected to database session.
         """
         # Check if database already contains this KernelTemplate object.
-        skeleton = db_session.query(ImplSkeleton).filter(ImplSkeleton.name.like(self.name)).one_or_none()
+        skeleton: ImplSkeleton = db_session.query(ImplSkeleton).filter(ImplSkeleton.name.like(self.name)).one_or_none()
         if skeleton:
             # Supplement attributes not saved in database.
-            skeleton.communicationOperations = self.communicationOperations
-            skeleton.loops = self.loops
-            skeleton.kernels = self.kernels
             skeleton.connected_templates = self.connected_templates
             for template in skeleton.connected_templates:
                 if template[0].isIVPdependent:
@@ -224,18 +219,19 @@ class ImplSkeleton:
                     break
             skeleton.code_tree = self.code_tree
             skeleton.codegen = self.codegen
+            # ... communication operations.
+            communication_operations = dict()
+            skeleton.communicationOperations = CodeTree.count_communication(
+                skeleton.code_tree.root, communication_operations)
+            # .. kernels.
+            kernels = dict()
+            skeleton.kernels = CodeTree.count_kernel(skeleton.code_tree.root, kernels)
             # Update serialized members.
-            skeleton.communication_operations_serial = serialize_obj(skeleton.communicationOperations)
-            skeleton.loops_serial = serialize_obj(skeleton.loops)
-            skeleton.kernels_serial = serialize_obj(skeleton.kernels)
             skeleton.code_tree_serial = serialize_obj(skeleton.code_tree)
             skeleton.codegen_serial = serialize_obj(skeleton.codegen)
             return skeleton
         # Add new object to database.
         # Serialize data.
-        self.communication_operations_serial = serialize_obj(self.communicationOperations)
-        self.loops_serial = serialize_obj(self.loops)
-        self.kernels_serial = serialize_obj(self.kernels)
         self.code_tree_serial = serialize_obj(self.code_tree)
         self.codegen_serial = serialize_obj(self.codegen)
         # IDs of connected templates.
@@ -244,63 +240,7 @@ class ImplSkeleton:
         insert(db_session, self)
         return self
 
-    @staticmethod
-    def parse_code(yaml: str) -> Tuple[str, str, str]:
-        """Parse code of an implementation skeleton for communication operations, loops and kernels.
-
-        Parameters:
-        -----------
-        yaml : str
-            YAML object describing this object.
-
-        Returns:
-        --------
-        str
-            Communication operations used.
-        str
-            Loops used.
-        str
-            Kernels used.
-        """
-        communication_operations = dict()
-        loops = dict()
-        kernels = dict()
-        # Parse code.
-        zero_expr = eval_math_expr('0')
-        execution_count = eval_math_expr('1')
-        loop_stack = list()
-        for line in yaml.split('%'):
-            line = line.lstrip()
-            line = line.rstrip()
-            if line.startswith('COM'):
-                op_name = line.split(' ')[1]
-                if op_name not in communication_operations:
-                    communication_operations[op_name] = zero_expr
-                communication_operations[op_name] += execution_count
-            elif line.startswith('KERNEL'):
-                kernel_name = line.split(' ')[1]
-                if kernel_name not in kernels:
-                    kernels[kernel_name] = zero_expr
-                kernels[kernel_name] += execution_count
-            elif line.startswith('LOOP_START'):
-                loop_name = line.split(' ')[1]
-                loop_iterations = line.split(' ')[2]
-                loop_stack.append(loop_name)
-                execution_count = execution_count * eval_math_expr(loop_iterations)
-                # todo for full mpi support --> exclude all loops that only execute communication operations
-                if loop_name in loops:
-                    assert False
-                loops[loop_name] = eval_math_expr(execution_count)
-            elif line.startswith('LOOP_END'):
-                loop_name = line.split(' ')[1]
-                assert loop_name == loop_stack[-1]
-                loop_stack.pop()
-                loop_iterations = loops[loop_name]
-                execution_count = execution_count / eval_math_expr(loop_iterations)
-        return communication_operations, loops, kernels
-
-    def compute_communication_costs(
-            self, bench_data: 'pandas.DataFrame', method: ODEMethod, ivp: IVP) -> Dict[int, str]:
+    def compute_communication_costs(self, bench_data: DataFrame, method: ODEMethod, ivp: IVP) -> Dict[int, float]:
         """
         Compute the communication costs of a single iteration step of this object for the given configuration of ODE
         method and IVP.
@@ -319,7 +259,7 @@ class ImplSkeleton:
             Communication costs of a single iteration step of this impl skeleton sorted by number of cores.
         """
         constants = [corrector_steps(method), stages(method), ivp_grid_size(ivp.gridSize)]
-        costs = dict()
+        costs: Dict[int, float] = dict()
         # Compute for all number of cores...
         for cores, row in bench_data.iterrows():
             costs[cores] = 0.0
@@ -340,7 +280,7 @@ class ImplSkeleton:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        skeleton_id : int
+        skeleton_id: int
             ID of the impl skeleton requested.
 
         Returns:
@@ -348,14 +288,8 @@ class ImplSkeleton:
         ImplSkeleton
             Retrieved data record.
         """
-        skeleton = db_session.query(ImplSkeleton).filter(ImplSkeleton.db_id.is_(skeleton_id)).one()
+        skeleton: ImplSkeleton = db_session.query(ImplSkeleton).filter(ImplSkeleton.db_id.is_(skeleton_id)).one()
         # Deserialize attributes...
-        # Attribute communicationOperations.
-        skeleton.communicationOperations = deserialize_obj(skeleton.communication_operations_serial)
-        # Attribute loops.
-        skeleton.loops = deserialize_obj(skeleton.loops_serial)
-        # Attribute kernels.
-        skeleton.kernels = deserialize_obj(skeleton.kernels_serial)
         # Attribute connected_templates.
         # skeleton.connected_templates = [KernelTemplateConnect(
         #    name, skeleton, execs, kernel_templates)
@@ -366,4 +300,12 @@ class ImplSkeleton:
         skeleton.code_tree = deserialize_obj(skeleton.code_tree_serial)
         # Attribute codegen.
         skeleton.codegen = deserialize_obj(skeleton.codegen_serial)
+        # Parse code tree to collect information for attributes communication_operations and kernels.
+        # .. communication operations.
+        communication_operations = dict()
+        skeleton.communicationOperations = CodeTree.count_communication(
+            skeleton.code_tree.root, communication_operations)
+        # .. kernels.
+        kernels = dict()
+        skeleton.kernels = CodeTree.count_kernel(skeleton.code_tree.root, kernels)
         return skeleton

@@ -9,10 +9,9 @@ computations:
 variants:
   - name: ys_RHS_Approx_Update_jl
     code: |
-      %LOOP_START l s unroll 0 assign 0
-        %COMP A
-      %LOOP_END l
-      %COMP B
+        %LOOP l s unroll 0 assign 0
+            %COMP A
+        %COMP B
     pmodel :
       - working sets: { "(s+1)*n+s", "2*n" }
 codegen:

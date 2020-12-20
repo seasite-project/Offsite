@@ -34,15 +34,15 @@ def train_kernel_predictions(db_session: Session, machine: Machine, templates: L
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : Machine
+    machine: Machine
         Used Machine.
-    templates : List of KernelTemplate
+    templates: List of KernelTemplate
         Kernel templates to be trained.
-    methods : List of ODEMethod.
+    methods: List of ODEMethod.
         Used ODE methods.
-    ivps : List of IVP
+    ivps: List of IVP
         Used IVPs.
 
     Returns:
@@ -174,13 +174,13 @@ def compute_kernel_prediction(kernel: Kernel, machine: Machine, method: ODEMetho
 
     Parameters:
     -----------
-    kernel : Kernel
+    kernel: Kernel
         Trained kernel.
-    machine : Machine
+    machine: Machine
         Trained machine.
-    method : ODE Method
+    method: ODE Method
         Trained ODE method.
-    ivp : IVP
+    ivp: IVP
         Trained IVP.
 
     Returns:
@@ -231,7 +231,7 @@ def train_pmodel_prediction(pmodel: PModelKernel, machine: Machine, method: ODEM
 
     Parameters:
     -----------
-    pmodel : PModel
+    pmodel: PModel
         Trained pmodel kernel.
     machine: Machine
         Trained machine.
@@ -241,7 +241,7 @@ def train_pmodel_prediction(pmodel: PModelKernel, machine: Machine, method: ODEM
         Trained IVP.
     interval: SampleInterval
         Trained system size interval.
-    pmodel_predictions : dict (key=int, value=str)
+    pmodel_predictions: dict (key=int, value=str)
         Trained pmodel kernel runtime predictions sorted by number of CPU cores used.
 
     Returns:
@@ -291,15 +291,15 @@ def train_kernel_runtimes(db_session: Session, machine: Machine, templates: List
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : Machine
+    machine: Machine
         Used Machine.
-    templates : List of KernelTemplate
+    templates: List of KernelTemplate
         Kernel templates to be trained.
-    methods : List of ODEMethod.
+    methods: List of ODEMethod.
         Used ODE methods.
-    ivps : List of IVP
+    ivps: List of IVP
         Used IVPs.
 
     Returns:
@@ -370,13 +370,13 @@ def bench_kernel_runtime(kernel: Kernel, machine: Machine, method: ODEMethod, iv
 
     Parameters:
     -----------
-    kernel : Kernel
+    kernel: Kernel
         Trained kernel.
-    machine : Machine
+    machine: Machine
         Trained machine.
-    method : ODE Method
+    method: ODE Method
         Trained ODE method.
-    ivp : IVP
+    ivp: IVP
         Trained IVP.
 
     Returns:
@@ -426,7 +426,7 @@ def train_pmodel_runtime(pmodel: PModelKernel, machine: Machine, method: ODEMeth
 
     Parameters:
     -----------
-    pmodel : PModel
+    pmodel: PModel
         Trained pmodel kernel.
     machine: Machine
         Trained machine.
@@ -436,7 +436,7 @@ def train_pmodel_runtime(pmodel: PModelKernel, machine: Machine, method: ODEMeth
         Trained IVP.
     interval: SampleInterval
         Trained system size interval.
-    pmodel_predictions : dict (key=int, value=str)
+    pmodel_predictions: dict (key=int, value=str)
         Trained benchmarked pmodel kernel runtime predictions sorted by number of CPU cores used.
 
     Returns:

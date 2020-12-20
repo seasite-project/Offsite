@@ -3,8 +3,9 @@ Functions to train the tuning database with kernel block size predictions.
 """
 
 from multiprocessing import cpu_count, Pool
+from pathlib import Path
 from traceback import print_exc
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -26,15 +27,15 @@ def train_kernel_blocksizes(db_session: Session, machine: Machine, templates: Li
 
     Parameters:
     -----------
-    db_session : sqlalchemy.orm.session.Session
+    db_session: sqlalchemy.orm.session.Session
         Used database session.
-    machine : Machine
+    machine: Machine
         Used Machine.
-    templates : List of KernelTemplate
+    templates: List of KernelTemplate
         Kernel templates to be trained.
-    methods : List of ODEMethod.
+    methods: List of ODEMethod.
         Used ODE methods.
-    ivps : List of IVP
+    ivps: List of IVP
         Used IVPs.
 
     Returns:
@@ -100,13 +101,13 @@ def train_kernel_blocksize_prediction(kernel: Kernel, machine: Machine, method: 
 
     Parameters:
     -----------
-    kernel : Kernel
+    kernel: Kernel
         Trained kernel.
-    machine : Machine
+    machine: Machine
         Trained machine.
-    method : ODE Method
+    method: ODE Method
         Trained ODE method.
-    ivp : IVP
+    ivp: IVP
         Trained IVP.
 
     Returns:
@@ -133,7 +134,7 @@ def train_kernel_blocksize_prediction(kernel: Kernel, machine: Machine, method: 
 
 
 def compute_kernel_blocking_sizes(
-        path: 'pathlib.Path', pmodel_kernel: PModelKernel, machine: Machine, method: ODEMethod, ivp: IVP = None):
+        path: Path, pmodel_kernel: PModelKernel, machine: Machine, method: ODEMethod, ivp: Optional[IVP] = None):
     """
     Compute blocking size for a given configuration of kernel, IVP, ODE method and available machine using kerncraft's
     layer condition analysis.
@@ -196,7 +197,7 @@ def compute_kernel_blocking_sizes(
 
 def adjust_blocksize(bs: int, safety_margin: float, elem_per_cl: int):
     """
-    Adjust block size by appyling a safety margin factor and ensuring that the block size is a multiple of the
+    Adjust block size by applying a safety margin factor and ensuring that the block size is a multiple of the
     cacheline size.
 
     Parameters:

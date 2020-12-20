@@ -1,14 +1,13 @@
 code: |
-  %COM omp_barrier
-  %KERNEL ys_RHS_LC y
-  %COM omp_barrier
-  %LOOP_START k m-1
-    %SWAP Yprev Ycur double**
-    %KERNEL ys_RHS_LC Yprev[i]
     %COM omp_barrier
-  %LOOP_END k
-  %SWAP Yprev Ycur double**
-  %KERNEL ys_RHS Yprev[l]
-  %COM omp_barrier
-  %KERNEL ys_Approx
-  %KERNEL ys_Update
+    %KERNEL ys_RHS_LC y
+    %COM omp_barrier
+    %LOOP k m-1
+        %SWAP Yprev Ycur double**
+        %KERNEL ys_RHS_LC Yprev[i]
+        %COM omp_barrier
+    %SWAP Yprev Ycur double**
+    %KERNEL ys_RHS Yprev[l]
+    %COM omp_barrier
+    %KERNEL ys_Approx
+    %KERNEL ys_Update

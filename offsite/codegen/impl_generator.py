@@ -6,16 +6,17 @@ from copy import deepcopy
 from pathlib import Path
 from re import sub
 from subprocess import run, PIPE, CalledProcessError
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import attr
 from sortedcontainers import SortedDict
 
 import offsite.config
-from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType
+from offsite.codegen.code_tree import CodeTree, CodeNode, CodeNodeType, KernelNode, LoopNode
 from offsite.codegen.codegen_util import eval_loop_boundary, format_codefile, indent, write_closing_bracket, \
-    create_variantname
+    create_variant_name
 from offsite.codegen.kernel_generator import KernelCodeGenerator
+from offsite.config import Config
 from offsite.descriptions.impl_skeleton import ImplSkeleton
 from offsite.descriptions.ivp import IVP
 from offsite.descriptions.kernel_template import KernelTemplate, Kernel
@@ -66,6 +67,7 @@ class ImplCodeGenerator:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             if node.optimize_unroll is not None:
                 self.unroll_stack[node.optimize_unroll] = node
         if node.child:
@@ -115,7 +117,7 @@ class ImplCodeGenerator:
         config = offsite.config.offsiteConfig
 
         # Set some members to match current code generation.
-        code_tree = deepcopy(skeleton.code_tree).root
+        code_tree: CodeNode = deepcopy(skeleton.code_tree).root
         code_tree.name = skeleton.name
 
         self.unroll_stack.clear()
@@ -131,22 +133,32 @@ class ImplCodeGenerator:
         # Optimize tree: unroll
         self.unroll_tree(code_tree)
         # Generate code from tree and write to string.
-        codes = dict()
+        codes: Dict[str, str] = dict()
         for vid, variant in impl_variants:
+            if config.args.verbose:
+                print('Generating implementation variant ', end='')
             # Generate required kernel codes.
-            kernels = self.derive_impl_variant_kernels(variant)
+            kernels: List[Kernel] = self.derive_impl_variant_kernels(variant)
+            # Create implementation variant name.
+            variant_name: str = create_variant_name(kernels, skeleton.name)
+            if config.args.verbose:
+                print('{} (id = {}) ... '.format(variant_name, vid), end='')
             # Generate implementation variant.
-            name = Path('{}/{}.h'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+            name = Path('{}/{}.h'.format(self.folder_impl, create_variant_name(kernels, skeleton.name)))
             codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, False)
             # .. generate tiled version too?
             if config.args.tile:
-                name = Path('{}/{}_tiled.h'.format(self.folder_impl, create_variantname(kernels, skeleton.name)))
+                if config.args.verbose:
+                    print('adding tiled version ... '.format(variant_name, vid), end='')
+                name = Path('{}/{}_tiled.h'.format(self.folder_impl, create_variant_name(kernels, skeleton.name)))
                 vid = 123456
                 # TODO fix variant number
                 codes[name] = self.generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, True)
+            if config.args.verbose:
+                print('done.')
         return codes
 
-    def generate_implementation_trees(self, node: CodeNode, skeleton: 'ImplSkeleton', method: 'ODEMethod'):
+    def generate_implementation_trees(self, node: CodeNode, skeleton: ImplSkeleton, method: ODEMethod):
         """Generate implementation variant code tree.
 
         Parameters:
@@ -163,13 +175,15 @@ class ImplCodeGenerator:
         -
         """
         if node.type == CodeNodeType.LOOP:
+            node: LoopNode
             # Evaluate loop boundary expression.
             constants = [corrector_steps(method), stages(method)]
             node.boundary = eval_loop_boundary(node.boundary, constants)
         elif node.type == CodeNodeType.KERNEL:
+            node: KernelNode
             # Load kernel template from database.
             if node.template_name not in self.loaded_templates.keys():
-                template = KernelTemplate.from_database(self.db_session, node.template_name)
+                template: KernelTemplate = KernelTemplate.from_database(self.db_session, node.template_name)
                 self.loaded_templates[node.template_name] = template
                 self.required_datastructs = {**template.datastructs, **self.required_datastructs}
         # Traverse tree depth first.
@@ -178,18 +192,18 @@ class ImplCodeGenerator:
         if node.next:
             self.generate_implementation_trees(node.next, skeleton, method)
 
-    def derive_impl_variant_kernels(self, impl_variant: List[str]) -> List[Kernel]:
+    def derive_impl_variant_kernels(self, impl_variant: List[int]) -> List[Kernel]:
         return [self.map_kernel_id_to_object(kid) for kid in impl_variant]
 
-    def map_kernel_id_to_object(self, kernel_id: str) -> 'Kernel':
+    def map_kernel_id_to_object(self, kernel_id: int) -> 'Kernel':
         # Query kernel object from database.
-        kernel = Kernel.select(self.db_session, kernel_id)
+        kernel: Kernel = Kernel.select(self.db_session, kernel_id)
         # Select corresponding kernel template.
-        template = self.loaded_templates[kernel.template.name]
+        template: KernelTemplate = self.loaded_templates[kernel.template.name]
         try:
             return next(filter(lambda x: x.name == kernel.name, template.variants))
         except StopIteration:
-            raise RuntimeError('')
+            raise RuntimeError('Failed to find kernel \'{}\'!'.format(kernel.name))
 
     def generate_impl_variant(self, impl: CodeNode, variant_id: int, kernels: List[Kernel], skeleton: ImplSkeleton,
                               method: ODEMethod, ivp: IVP, gen_tiled_code: bool = False) -> str:
@@ -220,21 +234,20 @@ class ImplCodeGenerator:
         # Generate implementation variant code.
         code = ImplCodeGenerator.generate_implementation_code(impl, kernels, method, gen_tiled_code)
         # Write frame code.
-        code = self.write_skeleton_includes(variant_id, skeleton, method, ivp) + \
+        return self.write_skeleton_includes(variant_id, skeleton, method, ivp) + \
                ImplCodeGenerator.write_function_description() + ImplCodeGenerator.write_instrument_impl(variant_id) + \
                code + '}'
-        return code
 
     @staticmethod
-    def generate_implementation_code(node: CodeNode, kernels: Dict[str, 'Kernel'], method: ODEMethod,
-                                     gen_tiled_code: bool, code: str = '') -> str:
+    def generate_implementation_code(
+            node: CodeNode, kernels: List[Kernel], method: ODEMethod, gen_tiled_code: bool, code: str = '') -> str:
         """Write implementation variant code.
 
         Parameters:
         -----------
         node: CodeNode
             Root node of the code tree.
-        kernels: dict (key=str, val=Kernel)
+        kernels: list of Kernel
             Used kernels.
         method: ODEMethod
             Used ODE method.
@@ -250,10 +263,11 @@ class ImplCodeGenerator:
         """
         config = offsite.config.offsiteConfig
         if node.type == CodeNodeType.KERNEL:
+            node: KernelNode
             try:
-                kernel = next(filter(lambda x: x.template.name == node.template_name, kernels))
+                kernel: Kernel = next(filter(lambda x: x.template.name == node.template_name, kernels))
             except StopIteration:
-                print('')
+                raise RuntimeError('Failed to find kernel template \'{}\'!'.format(node.template_name))
             # Determine the used input vector.
             input_vector = ''
             if kernel.template.isIVPdependent:
@@ -336,7 +350,7 @@ class ImplCodeGenerator:
         # Write inclusion guard first.
         dstruct_str = '#pragma once\n\n'
         # Write data structures.
-        ds_pointers = ''
+        ds_variables = ''
         ds_alloc_str = ''
         ds_free_str = ''
         for name, desc in self.required_datastructs.items():
@@ -346,9 +360,11 @@ class ImplCodeGenerator:
             # Skip names reserved for pre-defined variables.
             if name in ('h', 't', 'g'):
                 continue
-            # Add to pointers.
-            ds_pointers += '{} {}{};\n'.format(desc.datatype, '*' * desc.struct_type, name)
+            # Add to variables.
+            ds_variables += '{} {}{};\n'.format(desc.datatype, '*' * desc.struct_type, name)
             # Add to alloc and free.
+            if desc.struct_type == DatastructType.scalar:
+                continue
             if desc.struct_type == DatastructType.array1D:
                 ds_alloc_str += '{} = alloc1d({});\n'.format(name, desc.size[0])
                 ds_free_str += 'free1d({});\n'.format(name)
@@ -360,8 +376,8 @@ class ImplCodeGenerator:
                 ds_free_str += 'free3d({});\n'.format(name)
             else:
                 assert False
-        # Write pointers.
-        dstruct_str += ds_pointers + '\n'
+        # Write variables.
+        dstruct_str += ds_variables + '\n'
         # Write allocate function.
         dstruct_str += 'static void allocate_data_structures() {\n'
         dstruct_str += ds_alloc_str
@@ -389,7 +405,7 @@ class ImplCodeGenerator:
         --------
         -
         """
-        config = offsite.config.offsiteConfig
+        config: Config = offsite.config.offsiteConfig
         # Create folder if it does not yet exist.
         if self.folder_ivp and not self.folder_ivp.exists():
             self.folder_ivp.mkdir(parents=True)
@@ -417,7 +433,7 @@ class ImplCodeGenerator:
         # Replace solution vector stubs.
         rhs_func_str = rhs_func_str.replace('%in', config.ode_solution_vector)
         # Replace IVP constants.
-        constants = ivp.constants.as_tuple()
+        constants: Optional[List[Tuple[str, Union[str, float, int]]]] = ivp.constants.as_tuple()
         for name, desc in ivp.constants.items():
             regex = r'(?![a-zA-Z0-9]-_)' + name + r'(?![a-zA-Z0-9-_])'
             rhs_func_str = sub(regex, str(eval_math_expr(desc.value, constants)), rhs_func_str)
@@ -488,9 +504,9 @@ class ImplCodeGenerator:
 
         Parameters:
         -----------
-        name : str
+        name: str
             Name of the array.
-        data : List of List of str
+        data: List of List of str
             Array data.
 
         Returns:
@@ -515,9 +531,9 @@ class ImplCodeGenerator:
 
         Parameters:
         -----------
-        name : str
+        name: str
             Name of the array.
-        data : List of str
+        data: List of str
             Array data.
 
         Returns:
@@ -567,7 +583,7 @@ class ImplCodeGenerator:
 
         Parameters:
         -----------
-        generated_files : dict (key=Path, value=str)
+        generated_files: dict (key=Path, value=str)
             Generated implementation variant codes and their associated file paths.
 
         Returns:

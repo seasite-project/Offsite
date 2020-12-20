@@ -1,4 +1,4 @@
-benchmark: OMP_BARRIER
+benchmark: omp_barrier
 machine: CascadelakeSP_Gold-6248
 compiler: icc 19.0.2.187
 flags: -O3 -fno-alias -xCORE-AVX512 -qopenmp -qopt-zmm-usage=high

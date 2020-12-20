@@ -2,6 +2,7 @@
 Configuration options of the off_tune application.
 """
 
+from argparse import Namespace
 from configparser import ConfigParser
 from enum import Enum
 from sys import version_info
@@ -47,9 +48,8 @@ class BenchType(Enum):
 
     - OMP_BARRIER
         OpenMP barrier benchmark.
-
     """
-    OMP_BARRIER = 'OMP_BARRIER'
+    OMP_BARRIER = 'omp_barrier'
 
 
 class IncoreToolType(Enum):
@@ -61,11 +61,39 @@ class IncoreToolType(Enum):
         OSACA tool.
     - LLVM-MCA
         LLVM-MCA tool.
-
     """
     IACA = 'IACA'
     OSACA = 'OSACA'
     LLVMMCA = 'LLVM-MCA'
+
+
+class RankingCriteriaType(Enum):
+    """
+    Defines whether implementation variants are ranked by ascending runtime or performance deviation from the best
+    rated implementation variant.
+
+    - ORDER
+        Rank implementation variants by their runtime.
+    - DEVIATION
+        Rank implementation variants by their performance deviation from the best rated variant.
+    """
+    ORDER = 'ORDER'
+    DEVIATION = 'DEVIATION'
+
+
+class RankingCutoffType(Enum):
+    """Defines what kind of cutoffValue is used to determine which implementation variants are included in the ranking.
+
+    - TOP
+        Include only a fixed number of all implementation variants:
+         - e.g. top 20 --> 20 best variants
+    - PERCENT
+        Include only a fixed percentage of all implementation variants:
+         - e.g. 20% --> best 20 % of all variants for cutoffCriteria ORDER.
+         - e.g. 20% --> all variants within 20 % deviation of the best variants for cutoffCriteria DEVIATION.
+    """
+    TOP = 'TOP'
+    PERCENT = 'PERCENT'
 
 
 @attr.s
@@ -77,13 +105,16 @@ class Config:
     TODO
     """
     # Program arguments
-    args = attr.ib(type='argparse.Namespace')
+    args = attr.ib(type=Namespace)
     # Configuration options ...
     # ... for working sets
     available_cache_size = attr.ib(type=float, default=0.99)
     samples_per_border = attr.ib(type=int, default=2)
     step_between_border_samples = attr.ib(type=float, default=100)
-    memory_lvl_sample_offset = attr.ib(type=float, default=1.25)
+    samples_per_interval = attr.ib(type=int, default=2)
+    samples_border_region_memory_lvl = attr.ib(type=int, default=5)
+    samples_memory_lvl = attr.ib(type=int, default=5)
+    memory_lvl_sample_offset = attr.ib(type=float, default=0.015)
     # ... for layer condition analysis
     layer_condition_safety_margin = attr.ib(type=float, default=2.0)
     # ... for benchmarking
@@ -99,12 +130,12 @@ class Config:
     blockings = attr.ib(type=List[str], default=list(['plain']))
 
     @classmethod
-    def from_file(cls, args: 'argparse.Namespace') -> 'Config':
+    def from_file(cls, args: Namespace) -> 'Config':
         """Construct Config object from configuration file.
 
         Parameters:
         -----------
-        args : argparse.Namespace
+        args: argparse.Namespace
             Passed program arguments.
 
         Returns:
@@ -113,7 +144,7 @@ class Config:
             Created Config file.
         """
         # Create default Config object.
-        config_obj = cls(args)
+        config_obj: Config = cls(args)
         # Read config file.
         path = args.config
         parser = ConfigParser()
@@ -137,9 +168,18 @@ class Config:
             tag_step = 'StepBetweenBorderSamples'
             if tag_step in parser[tag_ws]:
                 config_obj.step_between_border_samples = float(parser[tag_ws][tag_step])
-            tag_memory = 'MemoryLvlSampleOffset'
-            if tag_memory in parser[tag_ws]:
-                config_obj.memory_lvl_sample_offset = float(parser[tag_ws][tag_memory])
+            tag_interval = 'SamplesPerInterval'
+            if tag_interval in parser[tag_ws]:
+                config_obj.samples_per_interval = int(parser[tag_ws][tag_interval])
+            tag_memory_offset = 'MemoryLvlSampleOffset'
+            if tag_memory_offset in parser[tag_ws]:
+                config_obj.memory_lvl_sample_offset = float(parser[tag_ws][tag_memory_offset])
+            tag_memory_border_samples = 'SamplesBorderRegionToMemoryLvl'
+            if tag_memory_border_samples in parser[tag_ws]:
+                config_obj.samples_border_region_memory_lvl = int(parser[tag_ws][tag_memory_border_samples])
+            tag_memory_samples = 'SamplesMemoryLvl'
+            if tag_memory_samples in parser[tag_ws]:
+                config_obj.samples_memory_lvl = int(parser[tag_ws][tag_memory_samples])
         # ... layer condition analysis.
         tag_lc = 'LAYER CONDITION'
         if tag_lc in parser:

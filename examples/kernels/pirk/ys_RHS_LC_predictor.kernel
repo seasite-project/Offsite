@@ -11,15 +11,12 @@ computations:
 variants:
   - name : ys_RHS_LC_predictor_jil
     code: |
-      %LOOP_START i s unroll 1 assign 0
-      %COMP A
-      %LOOP_START l s unroll 0
-      %COMP B
-      %LOOP_END l
-      %LOOP_END i
-      %LOOP_START l s unroll 2
-      %COMP C
-      %LOOP_END l
+        %LOOP i s unroll 1 assign 0
+            %COMP A
+            %LOOP l s unroll 0
+                %COMP B
+        %LOOP l s unroll 2
+            %COMP C
     pmodel :
       - working sets: { "s*n+n+s*s" }
 codegen:

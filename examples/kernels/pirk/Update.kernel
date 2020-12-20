@@ -8,11 +8,10 @@ computations:
 variants:
   - name: Update_j
     code: |
-      %PRAGMA nounroll_and_jam
-      %PRAGMA ivdep
-      %LOOP_START j n
-      %COMP A
-      %LOOP_END j
+        %PRAGMA nounroll_and_jam
+        %PRAGMA ivdep
+        %LOOP j n
+            %COMP A
     pmodel :
       - working sets: { "2*n" }
 model_tool: kerncraft

@@ -21,11 +21,11 @@ class ImplVariant:
 
     Attributes:
     -----------
-    skeleton : int
+    skeleton: int
         Used impl skeleton.
-    kernels : list of int
+    kernels: list of int
         Used machine.
-    db_id : int
+    db_id: int
         ID of associated impl variant database table record.
     """
     skeleton = attr.ib(type=int)
@@ -44,12 +44,12 @@ class ImplVariant:
                      UniqueConstraint('skeleton', 'kernels_serial'),
                      sqlite_autoincrement=True)
 
-    def to_database(self, db_session: Session):
+    def to_database(self, db_session: Session) -> 'ImplVariant':
         """Push this ECM record object to the database.
 
         Parameters:
         -----------
-        db_session : sqlalchemy.orm.session.Session
+        db_session: sqlalchemy.orm.session.Session
             Used database session.
 
         Returns:
@@ -60,7 +60,7 @@ class ImplVariant:
         # Attribute kernels_serial.
         self.kernels_serial = ','.join(map(str, self.kernels))
         # Check if database already contains this ImplVariant object.
-        variant = db_session.query(ImplVariant).filter(
+        variant: ImplVariant = db_session.query(ImplVariant).filter(
             ImplVariant.skeleton.is_(self.skeleton), ImplVariant.kernels_serial.is_(self.kernels_serial)).one_or_none()
         if variant:
             # Supplement attributes not saved in database.
@@ -89,8 +89,7 @@ class ImplVariant:
         list of ImplVariant
             Retrieved list of data records.
         """
-        data = db_session.query(ImplVariant).all()
-        return data
+        return db_session.query(ImplVariant).all()
 
     @staticmethod
     def select(db_session: Session, variant_ids: List[int]) -> List['ImplVariant']:
@@ -101,7 +100,7 @@ class ImplVariant:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        variant_ids : list of int
+        variant_ids: list of int
             IDs of the impl variants requested.
 
         Returns:
@@ -109,7 +108,7 @@ class ImplVariant:
         list of ImplVariant
             Retrieved list of data records.
         """
-        variants = db_session.query(ImplVariant).filter(ImplVariant.db_id.in_(variant_ids)).all()
+        variants: List[ImplVariant] = db_session.query(ImplVariant).filter(ImplVariant.db_id.in_(variant_ids)).all()
         if len(variants) != len(variant_ids):
             raise RuntimeError('Unable to select all requested variants!')
         # Deserialize attributes...
