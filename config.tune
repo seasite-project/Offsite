@@ -1,12 +1,15 @@
+[PREDICTION]
+ModelingTool = KERNCRAFT
+IncoreModel = IACA
+
 [WORKING SETS]
 AvailableCacheSize = 0.99
 SamplesPerBorderRegion = 2
 SamplesPerInterval = 2
 StepBetweenBorderSamples = 100
-SamplesBorderRegionToMemoryLvl = 10
-SamplesMemoryLvl = 10
-MemoryLvlSampleOffset = 1.10
-MemoryLvlOffsetIncrement = 0.015
+SamplesBorderRegionToMemoryLvl = 5
+SamplesMemoryLvl = 5
+MemoryLvlSampleOffset = 1.015
 
 [LAYER CONDITION]
 SafetyMargin = 2.0
@@ -16,8 +19,6 @@ RepetitionsCommunicationOperations = 100
 
 [CODEGEN]
 idx = j
-first_idx = first
-last_idx = last
 ode_solution_vector = y
 yasksite_stencil_dir = examples/ivps/yasksite_stencils
 

@@ -1,4 +1,4 @@
-kerncraft version: 0.8.3.dev0
+kerncraft version: 0.8.11.dev0
 model name: Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz
 model type: Intel Xeon Broadwell EN/EP/EX processor
 clock: 2.20 GHz
@@ -8,6 +8,7 @@ cores per socket: 10
 threads per core: 1
 NUMA domains per socket: 1
 cores per NUMA domain: 10
+transparent hugepage: always
 
 in-core model: !!omap
   - IACA: BDW
@@ -20,16 +21,22 @@ FLOPs per cycle:
   SP: {ADD: 8, FMA: 16, MUL: 8, total: 32}
 
 compiler: !!omap
-- icc: -O3 -xCORE-AVX2 -fno-alias -qopenmp
-- clang: -O3 -mavx2 -D_POSIX_C_SOURCE=200809L -fopenmp
-- gcc: -Ofast -march=core-avx2 -fargument-noalias -ffast-math -D_POSIX_C_SOURCE=200809L
-    -fopenmp -lm
+- icc: -O3 -xCORE-AVX2 -fno-alias -qopenmp -ffreestanding -nolib-inline
+- clang: -O3 -mavx2 -D_POSIX_C_SOURCE=200809L -fopenmp -ffreestanding
+- gcc: -O3 -march=core-avx2 -fargument-noalias -ffast-math -D_POSIX_C_SOURCE=200809L
+    -fopenmp -lm -ffreestanding
 
 non-overlapping model:
-  ports: [2D, 3D]
+  ports:
+    IACA: [2D, 3D]
+    OSACA: [2D, 3D]
+    LLVM-MCA: [BWPort2, BWPort3]
   performance counter metric: T_nOL + T_L1L2 + T_L2L3 + T_L3MEM
 overlapping model:
-  ports: ['0', 0DV, '1', '2', '3', '4', '5', '6', '7']
+  ports:
+    IACA: ['0', 0DV, '1', '2', '3', '4', '5', '6', '7']
+    OSACA: ['0', 0DV, '1', '2', '3', '4', '5', '6', '7']
+    LLVM-MCA: [BWDivider, BWFPDivider, BWPort0, BWPort1, BWPort2, BWPort3, BWPort4, BWPort5, BWPort6, BWPort7]
   performance counter metric: Max(UOPS_EXECUTED_PORT_PORT_0:PMC[0-3], UOPS_EXECUTED_PORT_PORT_1:PMC[0-3],
     UOPS_EXECUTED_PORT_PORT_4:PMC[0-3], UOPS_EXECUTED_PORT_PORT_5:PMC[0-3], UOPS_EXECUTED_PORT_PORT_6:PMC[0-3],
     UOPS_EXECUTED_PORT_PORT_7:PMC[0-3])
@@ -46,7 +53,8 @@ memory hierarchy:
   upstream throughput: [architecture code analyzer, [2D, 3D]]
   transfers overlap: false
   performance counter metrics:
-    accesses: MEM_UOPS_RETIRED_LOADS_ALL:PMC[0-3] + MEM_UOPS_RETIRED_STORES_ALL:PMC[0-3]
+    loads: MEM_UOPS_RETIRED_LOADS_ALL:PMC[0-3]
+    stores: MEM_UOPS_RETIRED_STORES_ALL:PMC[0-3]
     misses: L1D_REPLACEMENT:PMC[0-3]
     evicts: L2_TRANS_L1D_WB:PMC[0-3]
 - level: L2
@@ -59,11 +67,12 @@ memory hierarchy:
   size per group: 256 kB
   threads per group: 1
   performance counter metrics:
-    accesses: L1D_REPLACEMENT:PMC[0-3] + L2_TRANS_L1D_WB:PMC[0-3]
+    loads: L1D_REPLACEMENT:PMC[0-3]
+    stores: L2_TRANS_L1D_WB:PMC[0-3]
     misses: L2_LINES_IN_ALL:PMC[0-3]
     evicts: L2_TRANS_L2_WB:PMC[0-3]
 - level: L3
-  cache per group: {cl_size: 64, sets: 20.480, ways: 20, replacement_policy: LRU,
+  cache per group: {cl_size: 64, sets: 20480, ways: 20, replacement_policy: LRU,
     write_allocate: true, write_back: true}
   cores per group: 10
   upstream throughput: [32 B/cy, half-duplex]
@@ -72,7 +81,8 @@ memory hierarchy:
   size per group: 25 MB
   threads per group: 10
   performance counter metrics:
-    accesses: L2_LINES_IN_ALL:PMC[0-3] + L2_TRANS_L2_WB:PMC[0-3]
+    loads: L2_LINES_IN_ALL:PMC[0-3]
+    stores: L2_TRANS_L2_WB:PMC[0-3]
     misses: (CAS_COUNT_RD:MBOX0C[01] + CAS_COUNT_RD:MBOX1C[01] + CAS_COUNT_RD:MBOX2C[01]
       + CAS_COUNT_RD:MBOX3C[01] + CAS_COUNT_RD:MBOX4C[01] + CAS_COUNT_RD:MBOX5C[01]
       + CAS_COUNT_RD:MBOX6C[01] + CAS_COUNT_RD:MBOX7C[01])
@@ -83,7 +93,13 @@ memory hierarchy:
   cores per group: 20
   upstream throughput: [full socket memory bandwidth, half-duplex]
   transfers overlap: false
-  penalty cycles per read stream: 0
+  performance counter metrics:
+    loads: (CAS_COUNT_RD:MBOX0C[01] + CAS_COUNT_RD:MBOX1C[01] + CAS_COUNT_RD:MBOX2C[01]
+      + CAS_COUNT_RD:MBOX3C[01] + CAS_COUNT_RD:MBOX4C[01] + CAS_COUNT_RD:MBOX5C[01]
+      + CAS_COUNT_RD:MBOX6C[01] + CAS_COUNT_RD:MBOX7C[01])
+    stores: (CAS_COUNT_WR:MBOX0C[01] + CAS_COUNT_WR:MBOX1C[01] + CAS_COUNT_WR:MBOX2C[01]
+      + CAS_COUNT_WR:MBOX3C[01] + CAS_COUNT_WR:MBOX4C[01] + CAS_COUNT_WR:MBOX5C[01]
+      + CAS_COUNT_WR:MBOX6C[01] + CAS_COUNT_WR:MBOX7C[01])
   size per group:
   threads per group: 20
 

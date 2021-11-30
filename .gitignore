@@ -7,3 +7,11 @@ tmp/
 *.pmd
 
 *.db
+
+*.c~
+*.h~
+
+*.o
+*.so
+
+__pycache__

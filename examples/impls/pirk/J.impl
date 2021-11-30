@@ -1,8 +1,0 @@
-code: |
-    %COM omp_barrier
-    %KERNEL RHS_predictor
-    %COM omp_barrier
-    %LOOP k m
-        %SWAP Fprev F double**
-        %KERNEL LC_RHS
-    %KERNEL ApproxUpdate

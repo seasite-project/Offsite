@@ -1,4 +1,4 @@
-"""@package codegen_util.py
+"""@package codegen.codegen_util.py
 Util functions used during code generation.
 """
 
@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import offsite.config
 from offsite.config import Config
-from offsite.evaluation.math_utils import eval_math_expr
+from offsite.util.math_utils import eval_math_expr
 
 # Indention used for code formatting.
 INDENTION = '  '
@@ -131,7 +131,7 @@ def substitute_rhs_call(computation: str, component: str, input_vector: str,
     return computation.replace('%RHS', component)
 
 
-def substitute_rhs_func(computation: str, rhs_func: str, input_vector: str, butcher_node: str) -> str:
+def substitute_rhs_func_call(computation: str, rhs_func: str, input_vector: str, butcher_node: str) -> str:
     """Substitute all RHS calls of the given computation code with the passed RHS function call.
 
     Parameters:
@@ -151,7 +151,7 @@ def substitute_rhs_func(computation: str, rhs_func: str, input_vector: str, butc
         Code with substituted RHS calls.
     """
     assert '%RHS' in computation
-    config = offsite.config.offsiteConfig
+    config: Config = offsite.config.offsiteConfig
     # Build RHS function call.
     if rhs_func == 'eval_range':
         # Remove loop over system dimension. Eval_range runs over the system range internally.
@@ -298,12 +298,11 @@ def write_instrument_kernel_end(indent_lvl: int, kernel_id: int) -> str:
     # Has to be raw to keep the newline character in printf.
     instr_end += '#ifdef _OPENMP\n'
     instr_end += indent(indent_lvl) + \
-                 r'printf("#Kernel={}\§t#Threads=%d\§t%.20e\§n", omp_get_num_threads(), T / 1e9 / n);'.format(
-                     kernel_id)
-    instr_end += '#else\n'
+                 r'printf("#Kernel={}\§t#Threads=%d\§t%.20e\§n", omp_get_num_threads(), T / 1e9 / n);'.format(kernel_id)
+    instr_end += '\n#else\n'
     instr_end += indent(indent_lvl) + \
                  r'printf("#Kernel={}\§t#Threads=1\§t%.20e\§n", T / 1e9 / n);'.format(kernel_id)
-    instr_end += '#endif\n'
+    instr_end += '\n#endif\n'
     indent_lvl -= 1
     instr_end += indent(indent_lvl) + '}\n'
     indent_lvl -= 1
@@ -350,7 +349,7 @@ def format_codefile(path: Path):
             raise RuntimeWarning('Formatting file {} with indent failed: {}'.format(path, error))
 
 
-def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[Path]:
+def write_codes_to_file(codes: Dict[str, str], folder: Path = None, suffix: str = '.c') -> List[Path]:
     """Write codes to file.
 
     Parameters:
@@ -359,6 +358,8 @@ def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[Path]:
         Code strings (val) and their associated file names (key).
     folder: Path
         Relative path to folder that will contain the written code files.
+    suffix: str
+        File suffix used for all generated codes files.
 
     Returns:
     --------
@@ -366,19 +367,79 @@ def write_codes_to_file(codes: Dict[str, str], folder: str) -> List[Path]:
         Written code files.
     """
     # Create folder if it does not yet exist.
-    folder = Path(folder)
-    if folder and not folder.exists():
-        folder.mkdir(parents=True)
+    if folder is not None:
+        folder = Path(folder)
+        if folder and not folder.exists():
+            folder.mkdir(parents=True)
     # Write code to file.
     written_files: List[Path] = list()
     for filename, code in codes.items():
-        path = Path('{}.c'.format(filename))
-        if folder:
+        path = Path('{}{}'.format(filename, suffix))
+        if folder is not None:
             path = folder / path
         with path.open('w') as file_handle:
             file_handle.write(code)
         written_files.append(path)
+        # Replace newline characters in printf commands.
+        try:
+            cmd = ['sed', '-i', 's/§n/n/g', '{}'.format(path)]
+            run(cmd, check=True, stdout=PIPE).stdout
+        except CalledProcessError as error:
+            raise RuntimeError('Unable to substitute newline character stubs in {}: {}'.format(path, error))
+        # Replace tabulator characters in printf commands.
+        try:
+            cmd = ['sed', '-i', 's/§t/t/g', '{}'.format(path)]
+            run(cmd, check=True, stdout=PIPE).stdout
+        except CalledProcessError as error:
+            raise RuntimeError('Unable to substitute tabulator character stubs in {}: {}'.format(path, error))
     # Format code files.
     for file in written_files:
         format_codefile(file)
     return written_files
+
+
+def write_code_to_file(code_str: str, file_name: str, folder: Path = None, suffix: str = '.c') -> Path:
+    """Write code to file.
+
+    Parameters:
+    -----------
+    code_str: str
+        Source code string.
+    file_name: str
+        Requested file name.
+    folder: Path
+        Relative path to folder that will contain the written code file.
+    file_suffix: str
+        File suffix used for the generated codes file.
+
+    Returns:
+    --------
+    Path
+        Path to written code file.
+    """
+    # Create folder if it does not yet exist.
+    if folder is not None:
+        folder = Path(folder)
+        if folder and not folder.exists():
+            folder.mkdir(parents=True)
+    # Write code to file.
+    file_path = Path('{}{}'.format(file_name, suffix))
+    if folder is not None:
+        file_path = folder / file_path
+    with file_path.open('w') as file_handle:
+        file_handle.write(code_str)
+    # Replace newline characters in printf commands.
+    try:
+        cmd = ['sed', '-i', 's/§n/n/g', '{}'.format(file_path)]
+        run(cmd, check=True, stdout=PIPE).stdout
+    except CalledProcessError as error:
+        raise RuntimeError('Unable to substitute newline character stubs in {}: {}'.format(file_path, error))
+    # Replace tabulator characters in printf commands.
+    try:
+        cmd = ['sed', '-i', 's/§t/t/g', '{}'.format(file_path)]
+        run(cmd, check=True, stdout=PIPE).stdout
+    except CalledProcessError as error:
+        raise RuntimeError('Unable to substitute tabulator character stubs in {}: {}'.format(file_path, error))
+    # Format code file.
+    format_codefile(file_path)
+    return file_path

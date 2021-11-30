@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 78
+#define VARIANT_ID 70
 
 #include <math.h>
 #include "RHS_Cusp.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-78\n");
+      printf ("\n#ImplVariant-70\n");
     }
 #endif
 #pragma omp barrier
-//RHS_LC_predictor %18
+//RHS_LC_predictor %14
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -64,10 +64,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=18\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=14\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=18\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=14\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -78,12 +78,12 @@ timestep (const int me, const int first, const int last, double t, double h)
 
 #pragma omp master
       {
-	double **tmp = Yprev;
+	double **swp_tmp = Yprev;
 	Yprev = Ycur;
-	Ycur = tmp;
+	Ycur = swp_tmp;
       }
 
-//RHS_LC %29
+//RHS_LC %25
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -127,10 +127,10 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=29\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=25\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=29\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=25\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
@@ -140,12 +140,12 @@ timestep (const int me, const int first, const int last, double t, double h)
 
 #pragma omp master
   {
-    double **tmp = Yprev;
+    double **swp_tmp = Yprev;
     Yprev = Ycur;
-    Ycur = tmp;
+    Ycur = swp_tmp;
   }
 
-//RHS %32
+//RHS %28
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -165,10 +165,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=32\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=28\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=32\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=28\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }

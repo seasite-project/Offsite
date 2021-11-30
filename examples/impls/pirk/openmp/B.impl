@@ -1,10 +1,11 @@
 code: |
-    %COM omp_barrier
+    %COM_NODE omp_barrier
     %KERNEL RHS_predictor
     %LOOP k m
-        %COM omp_barrier
+        %COM_NODE omp_barrier
         %KERNEL LC
-        %COM omp_barrier
+        %COM_NODE omp_barrier
         %KERNEL RHS
-    %COM omp_barrier
+    %COM_NODE omp_barrier
     %KERNEL ApproxUpdate
+family: TypeI

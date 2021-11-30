@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 397
+#define VARIANT_ID 365
 
 #include <math.h>
 #include "RHS_InverterChain.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-397\n");
+      printf ("\n#ImplVariant-365\n");
     }
 #endif
 #pragma omp barrier
-//RHS_LC_predictor %18
+//RHS_LC_predictor %14
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -64,10 +64,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=18\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=14\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=18\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=14\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -78,12 +78,12 @@ timestep (const int me, const int first, const int last, double t, double h)
 
 #pragma omp master
       {
-	double **tmp = Yprev;
+	double **swp_tmp = Yprev;
 	Yprev = Ycur;
-	Ycur = tmp;
+	Ycur = swp_tmp;
       }
 
-//RHS_LC %30
+//RHS_LC %26
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -129,10 +129,10 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=30\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=26\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=30\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=26\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
@@ -142,9 +142,9 @@ timestep (const int me, const int first, const int last, double t, double h)
 
 #pragma omp master
   {
-    double **tmp = Yprev;
+    double **swp_tmp = Yprev;
     Yprev = Ycur;
-    Ycur = tmp;
+    Ycur = swp_tmp;
   }
 
 //RHS_Approx_Update %1
@@ -160,19 +160,19 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma ivdep
     for (int j = first; j <= last; ++j)
       {
-	dy[j] =
+	dy =
 	  0.220462211176770 *
 	  (eval_component (j, t + 0.0885879595126800 * h, Yprev[0]));
-	dy[j] +=
+	dy +=
 	  0.388193468843170 *
 	  (eval_component (j, t + 0.409466864440740 * h, Yprev[1]));
-	dy[j] +=
+	dy +=
 	  0.328844319980060 *
 	  (eval_component (j, t + 0.787659461760850 * h, Yprev[2]));
-	dy[j] +=
+	dy +=
 	  0.0625000000000000 *
 	  (eval_component (j, t + 1.00000000000000 * h, Yprev[3]));
-	y[j] += h * dy[j];
+	y[j] += h * dy;
       }
 #ifdef INSTRUMENT
 #pragma omp barrier

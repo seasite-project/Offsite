@@ -1,23 +1,18 @@
-"""@package offsite_impl2csv
+"""@package apps.auxiliary.offsite_impl2csv
 Main script of the offsite_impl2csv application.
 """
 
 from argparse import ArgumentParser, Namespace
-from typing import List
 
 from pandas import read_sql_query, DataFrame
 from sqlalchemy.orm import Session
 
 from offsite import __version__
-from offsite.codegen.codegen_util import create_variant_name
-from offsite.db.db import open_db, close
-from offsite.db.db_mapping import mapping
-from offsite.descriptions.impl_skeleton import ImplSkeleton
-from offsite.descriptions.impl_variant import ImplVariant
-from offsite.descriptions.ivp import IVP
-from offsite.descriptions.kernel_template import Kernel
-from offsite.descriptions.ode_method import ODEMethod
-from offsite.evaluation.math_utils import eval_math_expr, ivp_grid_size, ivp_system_size, solve_equation
+from offsite.database import close, open_db
+from offsite.database.db_mapping import mapping
+from offsite.descriptions.ode import IVP, ODEMethod, ivp_system_size, ivp_grid_size
+from offsite.train.impl_variant import ImplVariant
+from offsite.util.math_utils import eval_math_expr, solve_equation
 
 
 def parse_program_args_app_impl2csv() -> Namespace:
@@ -37,7 +32,7 @@ def parse_program_args_app_impl2csv() -> Namespace:
     # Available general options.
     parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__version__),
                         help='Print program version and exit.')
-    parser.add_argument('--db', action='store', required=True, help='Path to database.')
+    parser.add_argument('--db', action='store', required=True, help='Path to used database.')
     parser.add_argument('--machine', action='store', required=True, type=int, help='Database ID of used machine.')
     parser.add_argument('--compiler', action='store', required=True, type=int, help='Database ID of used compiler.')
     parser.add_argument('--cores', action='store', required=True, type=int,
@@ -96,7 +91,7 @@ def construct_impl_variant_prediction_query(args: Namespace, ivp: int, method: i
 def find_prediction(predictions: DataFrame, n: int) -> str:
     # Search in the passed data frame for the particular prediction data that fits the given ODE system size (n).
     if n == 0:
-        return 0.0
+        return str(0.0)
     try:
         row: DataFrame = predictions.loc[(predictions['first'] <= n) & (predictions['last'] >= n)]
     except IndexError:
@@ -121,18 +116,6 @@ def construct_range_of_N(N_expr: str) -> range:
     return range(first, last + 1, incr)
 
 
-def derive_impl_variant_name(db_session: Session, impl: int) -> str:
-    # Get required data from database ...
-    # ... implementation variant record.
-    variant: ImplVariant = ImplVariant.select(db_session, [impl])[0]
-    # ... impl skeleton record.
-    skeleton: ImplSkeleton = ImplSkeleton.select(db_session, variant.skeleton)
-    # ... associated kernel records.
-    kernels: List[Kernel] = [Kernel.select(db_session, kid) for kid in variant.kernels]
-    # Derive implementation variant name.
-    return create_variant_name(kernels, skeleton.name)
-
-
 def write_impl_variant_prediction_data(args: Namespace, db_session: Session):
     # Fetch all objects required to determine the correct implementation prediction data, from the database.
     # ... used IVP.
@@ -153,7 +136,7 @@ def write_impl_variant_prediction_data(args: Namespace, db_session: Session):
         df = DataFrame(columns=('N', 't_perComponent', 't_timestep', 'MLUPs'))
         cur_row_idx = 0
         for N in construct_range_of_N(args.N):
-            # Determine ODE system size 'n' from 'N' by solving the IVP's grid size expression.
+            # Determine ODE system size 'n' from 'N' by solving the grid size expression of the IVP.
             # Note: Internally 'g' is used instead of 'N' since 'N' is already reserved in sympy.
             # E.g. g = sqrt(n) for Heat2D
             lhs = eval_math_expr('g', [ivp_grid_size(N)], cast_to=str)
@@ -171,7 +154,7 @@ def write_impl_variant_prediction_data(args: Namespace, db_session: Session):
             df.loc[cur_row_idx] = [N] + [t_component] + [t_timestep] + [mlups]
             cur_row_idx += 1
         # Write data frame to CSV.
-        df.to_csv('impl_{}_{}.csv'.format(impl_id, derive_impl_variant_name(db_session, int(impl_id))))
+        df.to_csv('impl_{}_{}.csv'.format(impl_id, ImplVariant.fetch_impl_variant_name(db_session, int(impl_id))))
 
 
 def run():

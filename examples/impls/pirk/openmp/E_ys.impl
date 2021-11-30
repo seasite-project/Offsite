@@ -1,7 +1,0 @@
-code: |
-    %COM omp_barrier
-    %LOOP k m
-        %KERNEL ys_RHS_LC
-        %COM omp_barrier
-    %KERNEL ys_RHS_Approx
-    %KERNEL ys_Update

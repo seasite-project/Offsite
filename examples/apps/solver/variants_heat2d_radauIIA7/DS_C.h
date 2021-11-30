@@ -6,6 +6,7 @@ double **F;
 double **Y;
 double **Yprev;
 double **Ycur;
+double *tmp;
 double f;
 double *Fs;
 double *Fn;
@@ -19,6 +20,7 @@ allocate_data_structures ()
   Y = alloc2d (s, n);
   Yprev = alloc2d (s, n);
   Ycur = alloc2d (s, n);
+  tmp = alloc1d (s);
   Fs = alloc1d (s);
   Fn = alloc1d (n);
 }
@@ -32,6 +34,7 @@ free_data_structures ()
   free2d (Y);
   free2d (Yprev);
   free2d (Ycur);
+  free1d (tmp);
   free1d (Fs);
   free1d (Fn);
 }

@@ -1,0 +1,67 @@
+ivp_dependent: true
+datastructs:
+  - double Y[n]
+  - double Fprev[s][n]
+  - double F[s][n]
+  - double A[s][s]
+  - double y[n]
+computations:
+  A: "Y[j] += A[l][i] * Fprev[i][j]"
+  B: "Y[j] = Y[j] * h + y[j]"
+  C: "F[l][j] = %RHS"
+variants:
+  - name : LC_RHS_lij
+    code: |
+        %PRAGMA nounroll_and_jam
+        %LOOP l s
+            %LOOP i s
+                %PRAGMA ivdep
+                %LOOP j n
+                    %COMP A
+            %PMODEL
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP B
+            %COM_NODE omp_barrier
+            %PMODEL
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP C
+            %COM_NODE omp_barrier
+    pmodel :
+      - name : 1
+        working sets: { "(s+1)*n+s*s", "(s+1)*n+c*s", "2*n" }
+      - name : 2
+        working sets: { "2*n" }
+      - name : 3
+        working sets: { "(s+1)*n", "2*n" }
+    codegen:
+      RHS: "eval_range"
+  - name : LC_RHS_lji
+    code: |
+        %PRAGMA nounroll_and_jam
+        %LOOP l s
+            %PRAGMA ivdep
+            %LOOP j n
+                %LOOP i s unroll 0
+                    %COMP A
+                %COMP B
+            %COM_NODE omp_barrier
+            %PMODEL
+            %PRAGMA ivdep
+            %LOOP j n
+                %COMP C
+            %COM_NODE omp_barrier
+    pmodel :
+      - name : 1
+        working sets: { "2*s*n+s*s", "(s+1)*n+s*c" }
+      - name : 2
+        working sets: { "(s+1)*n", "2*n" }
+    codegen:
+      RHS: "eval_component"
+codegen:
+  loop splits:
+    - i 0
+  RHS_input: "Y"
+  RHS_butcher_nodes: "c[l]"
+model_tool: kerncraft

@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 206
+#define VARIANT_ID 198
 
 #include <math.h>
 #include "RHS_Medakzo.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-206\n");
+      printf ("\n#ImplVariant-198\n");
     }
 #endif
 #pragma omp barrier
-//RHS_predictor %15
+//RHS_predictor %11
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -40,16 +40,16 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=15\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=11\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=15\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=11\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
 #endif
 #pragma omp barrier
-//LC %26
+//LC %22
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -65,11 +65,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma ivdep
 	for (int j = first; j <= last; ++j)
 	  {
-	    Y[l][j] = A[l][0] * F[0][j];
-	    Y[l][j] += A[l][1] * F[1][j];
-	    Y[l][j] += A[l][2] * F[2][j];
-	    Y[l][j] += A[l][3] * F[3][j];
-	    Y[l][j] = Y[l][j] * h + y[j];
+	    tmp = A[l][0] * F[0][j];
+	    tmp += A[l][1] * F[1][j];
+	    tmp += A[l][2] * F[2][j];
+	    tmp += A[l][3] * F[3][j];
+	    Y[l][j] = tmp * h + y[j];
 	  }
       }
 #ifdef INSTRUMENT
@@ -78,10 +78,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=26\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=22\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=26\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=22\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -89,7 +89,7 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma omp barrier
   for (int k = 0; k < 5; ++k)
     {
-//RHS %32
+//RHS %28
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -109,16 +109,16 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=32\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=28\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=32\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=28\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
 #endif
 #pragma omp barrier
-//LC %26
+//LC %22
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -134,11 +134,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma ivdep
 	    for (int j = first; j <= last; ++j)
 	      {
-		Y[l][j] = A[l][0] * F[0][j];
-		Y[l][j] += A[l][1] * F[1][j];
-		Y[l][j] += A[l][2] * F[2][j];
-		Y[l][j] += A[l][3] * F[3][j];
-		Y[l][j] = Y[l][j] * h + y[j];
+		tmp = A[l][0] * F[0][j];
+		tmp += A[l][1] * F[1][j];
+		tmp += A[l][2] * F[2][j];
+		tmp += A[l][3] * F[3][j];
+		Y[l][j] = tmp * h + y[j];
 	      }
 	  }
 #ifdef INSTRUMENT
@@ -147,10 +147,10 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=26\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=22\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=26\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=22\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }

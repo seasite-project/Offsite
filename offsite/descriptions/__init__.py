@@ -1,3 +1,3 @@
 """@package descriptions
-YAM description classes and parser utils.
+YAM description classes and parser utility functions.
 """

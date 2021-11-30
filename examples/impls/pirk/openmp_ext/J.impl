@@ -1,0 +1,8 @@
+code: |
+    %COM_NODE omp_barrier
+    %KERNEL RHS_predictor
+    %COM_NODE omp_barrier
+    %LOOP k m
+        %SWAP Fprev F double**
+        %KERNEL LC_RHS
+    %KERNEL ApproxUpdate

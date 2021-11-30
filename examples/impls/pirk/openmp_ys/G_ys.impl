@@ -1,0 +1,13 @@
+code: |
+    %COM_NODE omp_barrier
+    %KERNEL ys_RHS y
+    %COM_NODE omp_barrier
+    %KERNEL ys_LC
+    %COM_NODE omp_barrier
+    %LOOP k m-1
+        %KERNEL ys_RHS
+        %COM_NODE omp_barrier
+        %KERNEL ys_LC
+        %COM_NODE omp_barrier
+    %KERNEL ys_RHS_Approx
+    %KERNEL ys_Update

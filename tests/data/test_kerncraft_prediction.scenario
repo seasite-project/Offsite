@@ -1,0 +1,19 @@
+[MACHINE]
+path = examples/machines/node17.yml
+compiler = icc
+
+[SOLVER]
+type = ODE
+
+[IMPLEMENTATION SKELETON]
+dir = examples/impls/pirk/openmp/
+
+[KERNEL TEMPLATE]
+path = examples/kernels/pirk/RHS.kernel
+path = examples/kernels/pirk/Update.kernel
+
+[IVP]
+path = examples/ivps/InverterChain.ivp
+
+[ODE METHOD]
+path = examples/methods/implicit/radauIIA7.ode

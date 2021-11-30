@@ -1,16 +1,17 @@
 code: |
-    %COM omp_barrier
-    %COM mpi_communicate y
-    %COM omp_barrier
+    %COM_NODE omp_barrier
+    %COM_CLUST mpi_communicate y
+    %COM_NODE omp_barrier
     %KERNEL RHS_LC_predictor
-    %COM omp_barrier
+    %COM_NODE omp_barrier
     %LOOP k m-1
         %SWAP Yprev Ycur double**
         %KERNEL RHS_LC Yprev[i]
-        %COM omp_barrier
+        %COM_NODE omp_barrier
         %LOOP i s
-            %COM mpi_communicate Ycur[i]
-        %COM omp_barrier
+            %COM_CLUST mpi_communicate Ycur[i]
+        %COM_NODE omp_barrier
     %SWAP Yprev Ycur double**
     %KERNEL RHS_Approx Yprev[i]
     %KERNEL Update
+family: TypeII

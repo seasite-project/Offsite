@@ -2,11 +2,11 @@ ivp_dependent: true
 datastructs:
   - double y[n]
   - double Y[s][n]
-  - double dy[n]
+  - double dy
   - double b[s]
 computations:
-  A: "dy[j] += b[i] * (%RHS)"
-  B: "y[j] += h * dy[j]"
+  A: "dy += b[i] * (%RHS)"
+  B: "y[j] += h * dy"
   C: "y[j] += h * b[i] * (%RHS)"
 variants:
   - name : RHS_Approx_Update_ji
@@ -17,7 +17,7 @@ variants:
                 %COMP A
             %COMP B
     pmodel :
-      - working sets: { "(s+2)*n+s" }
+      - working sets: { "(s+1)*n+s" }
   - name : RHS_Approx_Update_ij
     code: |
         %PRAGMA nounroll_and_jam

@@ -1,4 +1,4 @@
-"""@package offsite_plot
+"""@package apps.auxiliary.offsite_plot
 Main script of the offsite_plot application.
 """
 
@@ -11,10 +11,12 @@ from pandas import read_sql_query, DataFrame
 from sqlalchemy.orm import Session
 
 from offsite import __version__
-from offsite.apps.auxiliary.offsite_db2name import fetch_impl_variant_name, fetch_kernel_name
-from offsite.db.db import open_db, close
-from offsite.db.db_mapping import mapping
-from offsite.evaluation.math_utils import eval_math_expr, ivp_system_size
+from offsite.database import close, open_db
+from offsite.database.db_mapping import mapping
+from offsite.descriptions.impl.kernel_template import Kernel
+from offsite.descriptions.ode import ivp_system_size
+from offsite.train.impl_variant import ImplVariant
+from offsite.util.math_utils import eval_math_expr
 
 
 class PlotType(Enum):
@@ -51,7 +53,7 @@ def parse_program_args_app_plot() -> Namespace:
     parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__version__),
                         help='Print program version and exit.')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print further information on this run.')
-    parser.add_argument('--db', action='store', required=True, help='Path to database. Default value: tune.db.')
+    parser.add_argument('--db', action='store', required=True, help='Path to used database.')
     parser.add_argument('--plot', action='store', required=True, type=PlotType,
                         help='Specify what is plotted. Possible values: BENCHMARK, IMPL, KERNEL.')
     parser.add_argument('--machine', action='store', required=True, type=int, help='Database ID of used machine.')
@@ -174,7 +176,7 @@ def plot_kernel_prediction(args: Namespace, db_session: Session):
     legend = list()
     for kernel_id, kernel_data in split_data.items():
         # Fetch kernel name from database.
-        kernel = fetch_kernel_name(db_session, int(kernel_id))
+        kernel = Kernel.fetch_kernel_name(db_session, int(kernel_id))
         #
         df = DataFrame(columns=('n', 'prediction'))
         #
@@ -244,14 +246,14 @@ def plot_impl_variant_prediction(args, db_session):
         raise RuntimeWarning('Failed to find fitting data! Check passed database IDs!')
     if args.verbose:
         print(data)
-    # Split data by implementation variant ID
+    # Split data by impl variant ID
     split_data = {idx: data.loc[idx] for idx in data.index.unique().values}
     # Format data.
     legend = list()
     #
     for impl_id, impl_data in split_data.items():
         # Fetch impl variant name from database.
-        impl = fetch_impl_variant_name(db_session, int(impl_id))
+        impl = ImplVariant.fetch_impl_variant_name(db_session, int(impl_id))
         #
         df = DataFrame(columns=('n', 'prediction'))
         cur_row_idx = 0
@@ -273,9 +275,9 @@ def plot_impl_variant_prediction(args, db_session):
                 last_pred: float = eval_math_expr(prediction, [ivp_system_size(last), ('x', last)], cast_to=float)
                 df.loc[cur_row_idx + 1] = [last] + [last_pred]
             cur_row_idx += 2
-        # Plot implementation variant.
+        # Plot impl variant.
         pyplot.plot(df['n'], df['prediction'])
-        # Save implementation variant name for legend.
+        # Save impl variant name for legend.
         legend.append('{} (id={})'.format(impl, impl_id))
         df.to_csv('impl_{}.csv'.format(impl_id))
     # Configure plot.

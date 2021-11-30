@@ -1,0 +1,23 @@
+ivp_dependent: false
+datastructs:
+  - double A[n]
+  - double B[n]
+  - double C[n]
+computations:
+  A: "C[j] = A[j] + B[j]"
+variants:
+  - name: Vec_Add_1
+    code: |
+        %PRAGMA ivdep
+        %LOOP j n
+            %COMP A
+    pmodel:
+      - working sets: { "3*n" }
+  - name: Vec_Add_2
+    code: |
+        %PRAGMA novector
+        %LOOP j n
+            %COMP A
+    pmodel:
+      - working sets: { "3*n" }
+model_tool: kerncraft

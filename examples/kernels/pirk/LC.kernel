@@ -1,13 +1,19 @@
 ivp_dependent: false
 datastructs:
   - double Y[s][n]
+  - double Yn[s]
   - double A[s][s]
+  - double tmp
   - double h
   - double F[s][n]
   - double y[n]
 computations:
   A: "Y[l][j] += A[l][i] * F[i][j]"
+  A1: "tmp += A[l][i] * F[i][j]"
+  A2: "Yn[l] += A[l][i] * F[i][j]"
   B: "Y[l][j] = Y[l][j] * h + y[j]"
+  B1: "Y[l][j] = tmp * h + y[j]"
+  B2: "Y[l][j] = Yn[l] * h + y[j]"
 variants:
   - name : LC_ijl
     code: |
@@ -24,7 +30,7 @@ variants:
                 %COMP B
     pmodel :
       - name : 1
-        working sets: { "2*s*n+s*s", "(s+1)*n+s*c" }
+        working sets: { "2*s*n+s*s", "(s+1)*n+s*s" }
       - name : 2
         working sets: { "(s+1)*n" }
   - name : LC_ilj
@@ -43,7 +49,7 @@ variants:
                 %COMP B
     pmodel :
       - name : 1
-        working sets: { "2*s*n+s*s", "(s+1)*n+s*c", "2*n" }
+        working sets: { "2*s*n+s*s", "(s+1)*n+s*s", "2*n" }
       - name : 2
         working sets: { "(s+1)*n", "2*n" }
   - name : LC_jil
@@ -52,9 +58,9 @@ variants:
         %LOOP j n
             %LOOP i s unroll 1
                 %LOOP l s unroll 0
-                    %COMP A
+                    %COMP A2
             %LOOP l s unroll 2
-                %COMP B
+                %COMP B2
     pmodel :
       - working sets: { "(2*s+1)*n+s*s" }
   - name : LC_jli
@@ -63,8 +69,8 @@ variants:
         %LOOP j n
             %LOOP l s unroll 1
                 %LOOP i s unroll 0
-                    %COMP A
-                %COMP B
+                    %COMP A1
+                %COMP B1
     pmodel :
       - working sets: { "(2*s+1)*n+s*s" }
   - name : LC_lij
@@ -92,8 +98,8 @@ variants:
             %PRAGMA ivdep
             %LOOP j n
                 %LOOP i s unroll
-                    %COMP A
-                %COMP B
+                    %COMP A1
+                %COMP B1
     pmodel :
       - working sets: { "(2*s+1)*n+s*s", "(s+2)*n+s" }
 codegen:

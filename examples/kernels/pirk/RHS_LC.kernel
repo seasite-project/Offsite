@@ -2,6 +2,7 @@ ivp_dependent: true
 datastructs:
   - double Yprev[s][n]
   - double Ycur[s][n]
+  - double tmp[s]
   - double A[s][s]
   - double f
   - double Fs[s]
@@ -10,7 +11,9 @@ datastructs:
 computations:
   A: "f = %RHS"
   B: "Ycur[l][j] += A[l][i] * f"
+  B1: "tmp[l] += A[l][i] * f"
   C: "Ycur[l][j] = Ycur[l][j] * h + y[j]"
+  C1: "Ycur[l][j] = tmp[l] * h + y[j]"
   D: "Fs[i] = %RHS"
   E: "Fn[j] = %RHS"
   F: "Ycur[l][j] += A[l][i] * Fs[l]"
@@ -23,9 +26,9 @@ variants:
             %LOOP i s unroll 1 assign 0
                 %COMP A
                 %LOOP l s unroll 0
-                    %COMP B
+                    %COMP B1
             %LOOP l s unroll 2
-                %COMP C
+                %COMP C1
     pmodel :
       - working sets: { "s*n+n+s*s", "2*s*n+n+s*s" }
     codegen :

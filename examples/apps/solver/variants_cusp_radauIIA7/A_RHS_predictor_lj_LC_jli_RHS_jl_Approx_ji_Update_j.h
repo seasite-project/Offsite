@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 336
+#define VARIANT_ID 320
 
 #include <math.h>
 #include "RHS_Cusp.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-336\n");
+      printf ("\n#ImplVariant-320\n");
     }
 #endif
 #pragma omp barrier
-//RHS_predictor %15
+//RHS_predictor %11
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -40,10 +40,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=15\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=11\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=15\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=11\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -51,7 +51,7 @@ timestep (const int me, const int first, const int last, double t, double h)
   for (int k = 0; k < 6; ++k)
     {
 #pragma omp barrier
-//LC %24
+//LC %20
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -64,26 +64,26 @@ timestep (const int me, const int first, const int last, double t, double h)
 #pragma ivdep
 	for (int j = first; j <= last; ++j)
 	  {
-	    Y[0][j] = 0.112999479323160 * F[0][j];
-	    Y[0][j] += -0.0403092207235200 * F[1][j];
-	    Y[0][j] += 0.0258023774203400 * F[2][j];
-	    Y[0][j] += -0.00990467650730000 * F[3][j];
-	    Y[0][j] = Y[0][j] * h + y[j];
-	    Y[1][j] = 0.234383995747400 * F[0][j];
-	    Y[1][j] += 0.206892573935360 * F[1][j];
-	    Y[1][j] += -0.0478571280485400 * F[2][j];
-	    Y[1][j] += 0.0160474228065200 * F[3][j];
-	    Y[1][j] = Y[1][j] * h + y[j];
-	    Y[2][j] = 0.216681784623250 * F[0][j];
-	    Y[2][j] += 0.406123263867370 * F[1][j];
-	    Y[2][j] += 0.189036518170060 * F[2][j];
-	    Y[2][j] += -0.0241821048998300 * F[3][j];
-	    Y[2][j] = Y[2][j] * h + y[j];
-	    Y[3][j] = 0.220462211176770 * F[0][j];
-	    Y[3][j] += 0.388193468843170 * F[1][j];
-	    Y[3][j] += 0.328844319980060 * F[2][j];
-	    Y[3][j] += 0.0625000000000000 * F[3][j];
-	    Y[3][j] = Y[3][j] * h + y[j];
+	    tmp = 0.112999479323160 * F[0][j];
+	    tmp += -0.0403092207235200 * F[1][j];
+	    tmp += 0.0258023774203400 * F[2][j];
+	    tmp += -0.00990467650730000 * F[3][j];
+	    Y[0][j] = tmp * h + y[j];
+	    tmp = 0.234383995747400 * F[0][j];
+	    tmp += 0.206892573935360 * F[1][j];
+	    tmp += -0.0478571280485400 * F[2][j];
+	    tmp += 0.0160474228065200 * F[3][j];
+	    Y[1][j] = tmp * h + y[j];
+	    tmp = 0.216681784623250 * F[0][j];
+	    tmp += 0.406123263867370 * F[1][j];
+	    tmp += 0.189036518170060 * F[2][j];
+	    tmp += -0.0241821048998300 * F[3][j];
+	    Y[2][j] = tmp * h + y[j];
+	    tmp = 0.220462211176770 * F[0][j];
+	    tmp += 0.388193468843170 * F[1][j];
+	    tmp += 0.328844319980060 * F[2][j];
+	    tmp += 0.0625000000000000 * F[3][j];
+	    Y[3][j] = tmp * h + y[j];
 	  }
 #ifdef INSTRUMENT
 #pragma omp barrier
@@ -91,16 +91,16 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=24\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=20\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=24\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=20\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
 #endif
 #pragma omp barrier
-//RHS %33
+//RHS %29
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -124,17 +124,17 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=33\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=29\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=33\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=29\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
 #endif
     }
 #pragma omp barrier
-//Approx %14
+//Approx %10
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -158,15 +158,15 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=14\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=10\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=14\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=10\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
 #endif
-//Update %27
+//Update %23
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -188,10 +188,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=27\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=23\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=27\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=23\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }

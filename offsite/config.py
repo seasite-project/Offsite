@@ -6,7 +6,6 @@ from argparse import Namespace
 from configparser import ConfigParser
 from enum import Enum
 from sys import version_info
-from typing import List
 
 import attr
 
@@ -17,6 +16,7 @@ __impl_skeleton_ext__ = '.impl'
 __ivp_ext__ = '.ivp'
 __kernel_template_ext__ = '.kernel'
 __ode_method_ext__ = '.ode'
+__tuning_scenario_ext__ = '.scenario'
 
 
 class ProgramModeType(Enum):
@@ -67,33 +67,28 @@ class IncoreToolType(Enum):
     LLVMMCA = 'LLVM-MCA'
 
 
-class RankingCriteriaType(Enum):
+class SolverType(Enum):
+    GENERIC = 'GENERIC'
+    ODE = 'ODE'
+
+
+class SolverSpecificTableType(Enum):
+    IVP = 'IVP'
+    ODE_METHOD = 'ODE_METHOD'
+
+
+class GeneratedCodeLanguageType(Enum):
+    """Defines what type of code is generated.
+
+    - C
+        C style code.
+    - CPP
+        C++ style code.
+
     """
-    Defines whether implementation variants are ranked by ascending runtime or performance deviation from the best
-    rated implementation variant.
-
-    - ORDER
-        Rank implementation variants by their runtime.
-    - DEVIATION
-        Rank implementation variants by their performance deviation from the best rated variant.
-    """
-    ORDER = 'ORDER'
-    DEVIATION = 'DEVIATION'
-
-
-class RankingCutoffType(Enum):
-    """Defines what kind of cutoffValue is used to determine which implementation variants are included in the ranking.
-
-    - TOP
-        Include only a fixed number of all implementation variants:
-         - e.g. top 20 --> 20 best variants
-    - PERCENT
-        Include only a fixed percentage of all implementation variants:
-         - e.g. 20% --> best 20 % of all variants for cutoffCriteria ORDER.
-         - e.g. 20% --> all variants within 20 % deviation of the best variants for cutoffCriteria DEVIATION.
-    """
-    TOP = 'TOP'
-    PERCENT = 'PERCENT'
+    C = 'C'
+    CPP = 'CPP'
+    CPP_MPI = 'MPI'
 
 
 @attr.s
@@ -102,7 +97,6 @@ class Config:
 
     Attributes:
     -----------
-    TODO
     """
     # Program arguments
     args = attr.ib(type=Namespace)
@@ -114,7 +108,7 @@ class Config:
     samples_per_interval = attr.ib(type=int, default=2)
     samples_border_region_memory_lvl = attr.ib(type=int, default=5)
     samples_memory_lvl = attr.ib(type=int, default=5)
-    memory_lvl_sample_offset = attr.ib(type=float, default=0.015)
+    memory_lvl_sample_offset = attr.ib(type=float, default=1.015)
     # ... for layer condition analysis
     layer_condition_safety_margin = attr.ib(type=float, default=2.0)
     # ... for benchmarking
@@ -125,9 +119,11 @@ class Config:
     var_last_idx = attr.ib(type=str, default='last')
     ode_solution_vector = attr.ib(type=str, default='y')
     yasksite_stencil_dir = attr.ib(type=str, default='examples/ivps/yasksite_stencils')
-    # .. for yasksite
-    foldings = attr.ib(type=List[str], default=list(['']))
-    blockings = attr.ib(type=List[str], default=list(['plain']))
+    # ... for LIKWID
+    likwid_set_frequencies = attr.ib(type=str, default='likwid-setFrequencies')
+    # ... for predictions
+    pred_model_tool = attr.ib(type=ModelToolType, default=ModelToolType.KERNCRAFT)
+    pred_incore_tool = attr.ib(type=IncoreToolType, default=IncoreToolType.IACA)
 
     @classmethod
     def from_file(cls, args: Namespace) -> 'Config':
@@ -210,17 +206,23 @@ class Config:
             tag_yasksite_stencil_dir = 'yasksite_stencil_dir'
             if tag_yasksite_stencil_dir in parser[tag_codegen]:
                 config_obj.yasksite_stencil_dir = parser[tag_codegen][tag_yasksite_stencil_dir]
-        # ... yasksite
-        tag_yasksite = 'YASKSITE'
-        if tag_yasksite in parser:
-            tag_folding = 'folding'
-            if tag_folding in parser[tag_yasksite]:
-                foldings_str = parser[tag_yasksite][tag_folding]
-                config_obj.foldings = [f.replace("''", "").strip() for f in foldings_str.split(';') if f]
-            tag_blocking = 'blocking'
-            if tag_blocking in parser[tag_yasksite]:
-                blockings_str = parser[tag_yasksite][tag_blocking]
-                config_obj.blockings = [b.replace("''", "").strip() for b in blockings_str.split(';') if b]
+        # ... LIKWID.
+        tag_likwid = 'LIKWID'
+        if tag_likwid in parser:
+            tag_freq = 'set-frequencies'
+            if tag_freq in parser[tag_freq]:
+                config_obj.likwid_set_frequencies = parser[tag_likwid][tag_freq]
+        # .. prediction tools.
+        tag_pred = 'PREDICTION'
+        if tag_pred in parser:
+            tag_tool = 'ModelingTool'
+            if tag_tool in parser[tag_pred]:
+                tool_str = parser[tag_pred][tag_tool]
+                config_obj.pred_model_tool = ModelToolType[tool_str]
+            tag_incore = 'IncoreModel'
+            if tag_incore in parser[tag_pred]:
+                incore_str = parser[tag_pred][tag_incore]
+                config_obj.pred_incore_tool = IncoreToolType[incore_str]
         # Return created Config object.
         return config_obj
 
