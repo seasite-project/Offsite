@@ -1,12 +1,13 @@
 """@package apps.offsite_rank
 Main script of the offsite_rank application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace
-from pathlib import Path
-from time import time
 from typing import Dict, List
 
+from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
@@ -21,6 +22,7 @@ from offsite.ranking.ranking import create_rankings, create_rankings_ode
 from offsite.ranking.ranking_task import RankTask, parse_ranking_tasks
 from offsite.solver import Solver, SolverType, SolverSpecificTableType
 from offsite.tuning_scenario import TuningScenario
+from offsite.util.time import start_timer, stop_timer
 
 
 def parse_program_args_app_rank() -> Namespace:
@@ -77,8 +79,9 @@ def rank():
     args: Namespace = offsite.config.offsiteConfig.args
     verbose: bool = args.verbose
     # Start timer.
+    ts = -1
     if verbose:
-        start_time = time()
+        ts = start_timer()
     # Open database.
     db_session: Session = open_db(args.db)
     # Parser phase.
@@ -93,7 +96,7 @@ def rank():
     machine = parse_machine_state(scenario.machine, scenario.compiler)
     machine = machine.to_database(db_session)
     # ... ODE method descriptions if required by solver.
-    methods = None
+    methods: List[ODEMethod] = list()
     if SolverSpecificTableType.ODE_METHOD in scenario.solver.specific_tables:
         methods_dict: Dict[str, ODEMethod] = dict()
         if scenario.method_path is not None:
@@ -104,11 +107,11 @@ def rank():
             for d in scenario.method_dir:
                 for m in parse_methods(d):
                     methods_dict[m.name] = m
-        methods: List[ODEMethod] = [method.to_database(db_session) for method in methods_dict.values()]
+        methods = [method.to_database(db_session) for method in methods_dict.values()]
         if not methods:
             raise RuntimeError('No valid ODE methods found: \'{}\''.format(args.method))
     # ... IVP descriptions if required by solver.
-    ivps = None
+    ivps: List[IVP] = list()
     if SolverSpecificTableType.IVP in scenario.solver.specific_tables:
         ivps_dict: Dict[str, IVP] = dict()
         if scenario.ivp_path is not None:
@@ -120,7 +123,7 @@ def rank():
                 for i in parse_ivps(d):
                     if i.name not in methods:
                         ivps_dict[i.name] = i
-        ivps: List[IVP] = [ivp.to_database(db_session) for ivp in ivps_dict.values()]
+        ivps = [ivp.to_database(db_session) for ivp in ivps_dict.values()]
         if not ivps:
             raise RuntimeError('No valid IVPs found: \'{}\''.format(args.ivp))
     # Print information on the parsed descriptions.
@@ -128,8 +131,9 @@ def rank():
         print_yaml_desc(machine, None, None, methods, ivps)
     # Ranking phase.
     print('#' * 80 + '\n\nRanking phase...\n')
+    ts_rank = -1
     if verbose:
-        start_time_ranking = time()
+        ts_rank = start_timer()
     # .. create ranking tasks.
     rank_tasks: List[RankTask] = parse_ranking_tasks(args.tasks)
     if len(rank_tasks) == 0:
@@ -141,18 +145,16 @@ def rank():
         create_rankings(db_session, machine, rank_tasks, args.ode_size)
     if verbose:
         print(' done.\n')
-        stop_time_ranking = time()
         print('#' * 80 + '\n')
-        print('Ranking phase took {} seconds.'.format(round(stop_time_ranking - start_time_ranking, 3)))
+        print('Ranking phase took {} seconds.'.format(stop_timer(ts_rank)))
     # Commit to database.
     commit(db_session)
     # Close database.
     close(db_session)
     # Stop timer.
     if verbose:
-        stop_time = time()
         print('#' * 80 + '\n')
-        print('Tuning run took {} seconds.'.format(round(stop_time - start_time, 3)))
+        print('Tuning run took {} seconds.'.format(stop_timer(ts)))
 
 
 def run():

@@ -1,10 +1,12 @@
 """@package codegen.generator.kerncraft_generator
 Definition of class KerncraftCodeGenerator.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
 from re import sub
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import attr
 from sortedcontainers import SortedDict
@@ -15,7 +17,7 @@ from offsite.codegen.code_dsl.code_tree import CodeTree
 from offsite.codegen.codegen_util import eval_loop_boundary, write_closing_bracket
 from offsite.config import Config
 from offsite.descriptions.ode import IVP, ODEMethod, corrector_steps, ivp_grid_size, ivp_system_size, stages
-from offsite.descriptions.parser import ComponentDesc, DatastructDict
+from offsite.descriptions.parser import ComponentDesc, DatastructDict, DatastructType
 from offsite.util.math_utils import eval_math_expr
 
 
@@ -132,15 +134,20 @@ class KerncraftCodeGenerator:
         for tree in self.pmodel_trees:
             tree.name = kernel.name + ('_{}'.format(idx) if len(self.pmodel_trees) > 1 else '')
             idx += 1
+        # Write variable definition string.
+        var_defs: str = self.construct_variable_defs(
+            kernel.template.datastructs, kernel.used_datastructs, kernel.template.codegen, ivp)
         # Generate code from tree and write to string.
         codes: Dict[str, str] = dict()
         for tree in self.pmodel_trees:
             if kernel.template.isIVPdependent:
                 assert ivp is not None
-                config: Config = offsite.config.offsiteConfig
                 # Determine RHS input variable.
-                rhs_input: str = kernel.template.codegen[
-                    'RHS_input'] if 'RHS_input' in kernel.template.codegen else config.ode_solution_vector
+                try:
+                    rhs_input: str = kernel.template.codegen['RHS_input']
+                except KeyError:
+                    raise RuntimeError(
+                        'Kernel template {} is missing required entry \'RHS_input\'.'.format(kernel.template.name))
                 # Determine IVP constants.
                 ivp_constants: Optional[List[Tuple[str, Union[str, float, int]]]] = ivp.constants.as_tuple()
                 if system_size is not None:
@@ -152,33 +159,43 @@ class KerncraftCodeGenerator:
                     code_name: str = tree.name + '_{}'.format(ivp.name) + (
                         '_{}'.format(idx) if len(ivp.components.keys()) > 1 else '')
                     # Deepcopy required to assure that unroll counter is reset for each IVP component.
-                    codes[code_name] = self.generate_kerncraft_code(
+                    codes[code_name] = var_defs + self.generate_kerncraft_code(
                         tree, rhs, rhs_input, ivp_constants, deepcopy(self.unroll_counter))
                     idx += 1
             else:
-                codes[tree.name] = self.generate_kerncraft_code(tree)
-        # Prepend variable definitions to written code.
-        var_defs: str = self.construct_variable_defs(kernel.template.datastructs)
-        codes = {name: var_defs + code for name, code in codes.items()}
+                assert ivp is None
+                codes[tree.name] = var_defs + self.generate_kerncraft_code(tree)
         return codes
 
     @staticmethod
-    def construct_variable_defs(datastructs: DatastructDict) -> str:
+    def construct_variable_defs(avail_ds: DatastructDict, used_ds: Set[str], template_codegen: Dict[str, str],
+                                ivp: Optional[IVP] = None) -> str:
         """Construct variable definitions of a particular kernel.
 
         Parameters:
         -----------
-        datastruct: DatastructDict
-            Used data structures.
+        avail_ds: DatastructDict
+            Available data structures of this kernel's associated kernel template.
+        used_ds: DatastructDict
+            Data structures used by this kernel.
+
+        ivp: IVP
+            Used IVP.
 
         Returns:
         --------
         str
             Variable definitions string.
         """
+        rhs_vars: List[str] = list()
+        if ivp:
+            rhs_vars = [template_codegen['RHS_input'].split('[')[0],
+                        template_codegen['RHS_butcher_nodes'].split('[')[0]]
+        #
         var_defs: str = ''
-        for name, desc in datastructs.items():
-            var_defs += '{} {}{};\n'.format(desc.datatype, name, desc.dimensions_to_string())
+        for name, desc in avail_ds.items():
+            if name in used_ds or desc.struct_type == DatastructType.scalar or (ivp and name in rhs_vars):
+                var_defs += '{} {}{};\n'.format(desc.datatype, name, desc.dimensions_to_string())
         return var_defs + '\n'
 
     def generate_pmodel_trees(self, node: CodeNode, template: 'KernelTemplate', method: Optional[ODEMethod] = None,

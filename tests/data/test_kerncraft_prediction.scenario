@@ -4,6 +4,7 @@ compiler = icc
 
 [SOLVER]
 type = ODE
+name = TestSolver
 
 [IMPLEMENTATION SKELETON]
 dir = examples/impls/pirk/openmp/

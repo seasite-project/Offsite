@@ -3,13 +3,14 @@ path = examples/machines/node17.yml
 compiler = icc
 
 [SOLVER]
+name = PIRK
 type = ODE
 
 [IMPLEMENTATION SKELETON]
-dir = examples/impls/pirk/openmp_min/
+dir = examples/impls/pirk/openmp/
 
 [KERNEL TEMPLATE]
-dir = examples/kernels/pirk_min
+dir = examples/kernels/pirk
 
 [IVP]
 path = examples/ivps/InverterChain.ivp

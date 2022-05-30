@@ -1,10 +1,12 @@
 """@package codegen.code_dsl.code_tree
 Definitions of classes CodeTree, CodeTreeGenerator.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
 from re import sub
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import attr
 from lark import Visitor, tree as _tree, lexer as _lexer
@@ -25,7 +27,7 @@ class CodeTree:
     def substitute_butcher_coefficients(node: CodeNode, coeffs_a: List[List[str]], coeffs_b: List[str],
                                         coeffs_c: List[str], use_dummy_values=False):
         """
-        Recursively substitute all occurrences of butcher table entries in the passed code_dsl tree with the coefficient
+        Recursively substitute all occurrences of butcher table entries in the given code_dsl tree with the coefficient
         values provided by the given ODE method.
 
         Parameters:
@@ -192,7 +194,7 @@ class CodeTree:
         assert (loop.parent is not None) ^ (loop.prev is not None)
         assert loop.child is not None
         assert loop.split_at == 0
-        # At the moment only supports splitting the first iteration.
+        # TODO: at the moment only supports splitting the first iteration
         if loop.parent:
             parent: CodeNode = loop.parent
             parent.child = None
@@ -202,7 +204,7 @@ class CodeTree:
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, 1)
-            # Update loop variable with splitted loop iteration index.
+            # Update loop variable with split loop iteration index.
             CodeTree.replace_loop_var_with_iteration_idx(loop_bdy, loop)
             # Update loop start index.
             loop.start = loop.split_at + 1
@@ -224,7 +226,7 @@ class CodeTree:
             loop_bdy.parent = None
             # Update indention.
             CodeTree.update_indent(loop_bdy, 1)
-            # Update loop variable with splitted loop iteration index.
+            # Update loop variable with split loop iteration index.
             CodeTree.replace_loop_var_with_iteration_idx(loop_bdy, loop)
             # Update loop start index.
             loop.start = loop.split_at + 1
@@ -301,12 +303,13 @@ class CodeTree:
         """
         if node is None:
             return iter_count
-        if node.type == CodeNodeType.LOOP and ('unroll' not in node.optional_args or ignore_unroll):
+        if node.type == CodeNodeType.LOOP:
             node: LoopNode
-            if iter_count:
-                iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
-            else:
-                iter_count = '({} - {})'.format(node.boundary, node.start)
+            if 'unroll' not in node.optional_args or ignore_unroll:
+                if iter_count:
+                    iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
+                else:
+                    iter_count = '({} - {})'.format(node.boundary, node.start)
         if node.child:
             iter_count = CodeTree.iteration_count(node.child, iter_count, ignore_unroll)
         if node.next and node.type is not CodeNodeType.PMODEL:
@@ -331,19 +334,20 @@ class CodeTree:
         """
         if node is None:
             return iter_count
-        if node.type == CodeNodeType.LOOP and ('unroll' not in node.optional_args or ignore_unroll):
+        if node.type == CodeNodeType.LOOP:
             node: LoopNode
-            if iter_count:
-                iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
-            else:
-                iter_count = '({} - {})'.format(node.boundary, node.start)
+            if 'unroll' not in node.optional_args or ignore_unroll:
+                if iter_count:
+                    iter_count = '{} * ({} - {})'.format(iter_count, node.boundary, node.start)
+                else:
+                    iter_count = '({} - {})'.format(node.boundary, node.start)
         if node.parent:
             iter_count = CodeTree.iteration_count(node.parent, iter_count, ignore_unroll)
         return iter_count
 
     @staticmethod
     def find_pmodel_node(node: CodeNode, requested_idx: int, nxt_visited_idx=0,
-                         found_node: Optional[PModelNode] = None) -> Tuple[Optional[PModelNode], int]:
+                         found_node: Optional[PModelNode] = None) -> Tuple[Optional[Union[PModelNode, RootNode]], int]:
         """Traverse node's subtree and return the 'requested_idx' occurrence of a PModelNode object.
 
         Parameters:
@@ -364,10 +368,12 @@ class CodeTree:
             Returns None if no proper CodeNode object was found.
         """
         if node.type == CodeNodeType.ROOT:
+            node: RootNode
             if requested_idx == 0:
                 return node, nxt_visited_idx + 1
             nxt_visited_idx += 1
         elif node.type == CodeNodeType.PMODEL:
+            node: PModelNode
             if nxt_visited_idx == requested_idx:
                 return node, nxt_visited_idx + 1
             nxt_visited_idx += 1
@@ -380,7 +386,7 @@ class CodeTree:
         return found_node, nxt_visited_idx
 
     @staticmethod
-    def count_clust_lvl_communication(node: CodeNode, comm_count: Dict[str, str] = dict()) -> Dict[str, str]:
+    def count_clust_lvl_communication(node: CodeNode, comm_count: Dict[str, str]) -> Dict[str, str]:
         """Count the total number of cluster-level communication operation executions in the current node's subtree.
 
         Parameters:
@@ -413,7 +419,7 @@ class CodeTree:
         return comm_count
 
     @staticmethod
-    def count_node_lvl_communication(node: CodeNode, comm_count: Dict[str, str] = dict()) -> Dict[str, str]:
+    def count_node_lvl_communication(node: CodeNode, comm_count: Dict[str, str] = None) -> Dict[str, str]:
         """Count the total number of node-level communication operation executions in the current node's subtree.
 
         Parameters:
@@ -446,7 +452,7 @@ class CodeTree:
         return comm_count
 
     @staticmethod
-    def count_kernel(node: CodeNode, kernel_count: Dict[str, str] = dict()) -> Dict[str, str]:
+    def count_kernel(node: CodeNode, kernel_count: Dict[str, str]) -> Dict[str, str]:
         """Count the total number of kernel executions in the current node's subtree.
 
         Parameters:
@@ -477,6 +483,61 @@ class CodeTree:
         if node.next:
             kernel_count = CodeTree.count_kernel(node.next, kernel_count)
         return kernel_count
+
+    @staticmethod
+    def count_pmodel(node: CodeNode, count: int = 0) -> int:
+        """Count the total number of pmodel nodes in the current node's subtree.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        count: int
+            Current pmodel node count.
+
+        Returns:
+        --------
+        int
+            Total pmodel node count of the start node's subtree.
+        """
+        if node is None:
+            return count
+        if node.type == CodeNodeType.PMODEL:
+            count += 1
+        if node.child:
+            count = CodeTree.count_pmodel(node.child, count)
+        if node.next:
+            count = CodeTree.count_pmodel(node.next, count)
+        return count
+
+    @staticmethod
+    def collect_referenced_datastructs(node: CodeNode, datastructs: Set[str]) -> Set[str]:
+        """
+        Collect all data structures that are referenced in the current node's subtree.
+
+        Parameters:
+        -----------
+        node: CodeNode
+            Start node.
+        datastructs: Set of str
+            Current set of used data structures.
+
+        Returns:
+        --------
+        Set of str
+            Set of used data structures.
+        """
+        if node is None:
+            return datastructs
+        if node.type == CodeNodeType.COMPUTATION:
+            node: ComputationNode
+            for reference in node.references:
+                datastructs.add(reference['reference_name'])
+        if node.child:
+            datastructs = CodeTree.collect_referenced_datastructs(node.child, datastructs)
+        if node.next:
+            datastructs = CodeTree.collect_referenced_datastructs(node.next, datastructs)
+        return datastructs
 
     @staticmethod
     def update_indent(node: CodeNode, change_by_val: int):
@@ -550,7 +611,7 @@ class CodeTreeGenerator(Visitor):
             if not node:
                 return None
             if node.parent:
-                parent = node.parent
+                parent: LoopNode = node.parent
                 return parent
 
     @staticmethod
@@ -612,12 +673,14 @@ class CodeTreeGenerator(Visitor):
         self.update_loop_lvl(tree)
         # Read tree information.
         comp_id = str(tree.children[0])
-        # Get all references.
-        references = ComputationTreeVisitor().get_references(self.available_computations[comp_id].computation)
+        # Get all references and check if computation is IVP dependent.
+        computation = self.available_computations[comp_id].computation
+        references = ComputationTreeVisitor().get_references(computation)
+        ivp_dependent = '%RHS' in computation
         # Create computation node.
         prev, nxt, parent, child = self.get_relatives()
         node = ComputationNode(tree.lvl - self.frame_lvl, CodeNodeType.COMPUTATION, prev, nxt, parent, child, comp_id,
-                               references)
+                               references, ivp_dependent)
         # Update information.
         if self.switch_to_nxt_lvl:
             self.switch_to_nxt_lvl = False

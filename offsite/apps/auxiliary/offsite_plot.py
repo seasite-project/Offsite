@@ -1,5 +1,7 @@
 """@package apps.auxiliary.offsite_plot
 Main script of the offsite_plot application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace

@@ -1,33 +1,34 @@
 """@package descriptions.impl.kernel_template
 Definitions of classes KernelTemplate, Kernel and PModelKernel.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
 from datetime import datetime
 from getpass import getuser
 from itertools import product
-from pathlib import Path
 from sys import maxsize as sys_maxsize
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import attr
 from pandas import read_sql_query, DataFrame
+from pathlib2 import Path
 from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Table, UniqueConstraint
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Query, Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
 from offsite.codegen.code_dsl.code_dsl import parse_lark_grammar
-from offsite.codegen.code_dsl.code_node import CodeNode, CodeNodeType
+from offsite.codegen.code_dsl.code_node import CodeNode, CodeNodeType, RootNode
 from offsite.codegen.code_dsl.code_tree import CodeTree, CodeTreeGenerator
 from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.generator.kerncraft_generator import KerncraftCodeGenerator
 from offsite.codegen.generator.kernel_bench_generator import KernelBenchCodeGenerator, KernelBenchFiles
 from offsite.codegen.generator.yasksite_generator import YasksiteCodeGenerator
 from offsite.config import Config, ModelToolType, ProgramModeType, __kernel_template_ext__
-from offsite.database import METADATA
-from offsite.database.db import insert
+from offsite.database import METADATA, insert
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.ode import ODEMethod, corrector_steps, stages
 from offsite.descriptions.ode.ivp import IVP, ivp_grid_size
@@ -36,7 +37,7 @@ from offsite.descriptions.parser import load_yaml, ComputationDict, DatastructDi
 from offsite.util.math_utils import eval_math_expr, solve_equation
 from offsite.util.sample_interval import SampleInterval, SampleType, create_samples_lower_border_working_set, \
     create_samples_upper_border_working_set, create_samples_memory_lvl
-
+from offsite.util.working_sets.count_references import CountReferences
 
 # Extension of kernel files."""
 __kernel_ext__ = '.c'
@@ -112,8 +113,6 @@ class KernelTemplate:
         # Attribute variants.
         # .. used to temporarily store yaml data for post init.
         variants = yaml['variants']
-        # Attribute is_ivp_dependent.
-        is_ivp_dependent = yaml['ivp_dependent']
         # Attribute model_tool.
         tool_str = yaml['model_tool']
         if tool_str == ModelToolType.KERNCRAFT.value:
@@ -122,6 +121,13 @@ class KernelTemplate:
             model_tool = ModelToolType.YASKSITE
         else:
             assert False
+        # Attribute computations.
+        computations = ComputationDict.from_data(yaml['computations'])
+        # Attribute is_ivp_dependent.
+        if 'ivp_dependent' in yaml:
+            is_ivp_dependent = yaml['ivp_dependent']
+        else:
+            is_ivp_dependent = any('%RHS' in c.computation for c in computations.values())
         # Attribute datastructs.
         datastructs = DatastructDict.from_data(yaml['datastructs'])
         # ... implicitly add additional datastructures required by IVP-dependent kernels.
@@ -130,8 +136,6 @@ class KernelTemplate:
             datastructs['t'] = DatastructDesc('double', DatastructType.scalar, '1', False)
             # datastructs['g'] = DatastructDesc('double', DatastructType.scalar, '1', False)
             datastructs['c'] = DatastructDesc('double', DatastructType.array1D, ['s'], False)
-        # Attribute computations.
-        computations = ComputationDict.from_data(yaml['computations'])
         # Attribute codegen.
         codegen = dict()
         if 'codegen' in yaml:
@@ -229,8 +233,8 @@ class KernelTemplate:
             Instance of this object connected to database session.
         """
         # Check if database already contains this KernelTemplate object.
-        template: KernelTemplate = db_session.query(
-            KernelTemplate).filter(KernelTemplate.name.like(self.name)).one_or_none()
+        template: KernelTemplate = db_session.query(KernelTemplate).filter(
+            KernelTemplate.name.like(self.name)).one_or_none()
         if template:
             # Supplement attributes not saved in database.
             template.datastructs = self.datastructs
@@ -325,10 +329,11 @@ class Kernel:
     """
     name = attr.ib(type=str)
     template = attr.ib(type=KernelTemplate, hash=False)
-    pmodel_kernels = attr.ib(type='PModelKernel', hash=False)
+    pmodel_kernels = attr.ib(type=List['PModelKernel'], hash=False)
     code_tree = attr.ib(type=CodeTree, hash=False)
     communicationOperationsClusterLvl = attr.ib(type=Dict)
     communicationOperationsNodeLvl = attr.ib(type=Dict)
+    used_datastructs = attr.ib(type=Set)
     codegen = attr.ib(type=Dict, default=dict())
     optimization_parameters = attr.ib(type=Dict[str, str], default=dict(), hash=False)
     code_tree_serial = attr.ib(type=str, init=False)
@@ -374,13 +379,18 @@ class Kernel:
         code_tree = CodeTreeGenerator().generate(lark_code, template.computations)
         code_tree.visit(code_tree.root)
         code_tree = deepcopy(code_tree)
+        # Attribute pmodel_kernels.
         # .. used to temporarily store yaml data for post init.
-        pmodel_kernels = yaml['pmodel']
-        # Parse code tree to collect information for attribute communication_operations.
+        pmodel_kernels = yaml
+        # Parse code tree to collect information for attributes ...
+        # ... communication_operations.
         comm_ops_clust_lvl = dict()
         comm_ops_clust_lvl = CodeTree.count_clust_lvl_communication(code_tree.root, comm_ops_clust_lvl)
         comm_ops_node_lvl = dict()
         comm_ops_node_lvl = CodeTree.count_node_lvl_communication(code_tree.root, comm_ops_node_lvl)
+        # ... used_datastructs.
+        used_datastructs = set()
+        used_datastructs = CodeTree.collect_referenced_datastructs(code_tree.root, used_datastructs)
         # Attribute codegen.
         codegen = dict()
         if 'codegen' in yaml:
@@ -390,7 +400,8 @@ class Kernel:
                 else:
                     codegen[key] = value
         # Create object.
-        return cls(name, template, pmodel_kernels, code_tree, comm_ops_clust_lvl, comm_ops_node_lvl, codegen)
+        return cls(
+            name, template, pmodel_kernels, code_tree, comm_ops_clust_lvl, comm_ops_node_lvl, used_datastructs, codegen)
 
     @classmethod
     def from_database(cls, db_session: Session, kernel_name: str, kernel_template_id: int) -> 'Kernel':
@@ -417,6 +428,8 @@ class Kernel:
             raise RuntimeError('Unable to load Kernel object from database!')
         except MultipleResultsFound:
             raise RuntimeError('Unable to load Kernel object from database!')
+        # Attribute code_tree.
+        kernel.code_tree = deserialize_obj(kernel.code_tree_serial)
         # Attribute communicationOperations.
         comm_ops_clust_lvl = dict()
         kernel.communicationOperationsClusterLvl = CodeTree.count_clust_lvl_communication(
@@ -424,10 +437,11 @@ class Kernel:
         comm_ops_node_lvl = dict()
         kernel.communicationOperationsNodeLvl = CodeTree.count_node_lvl_communication(
             kernel.code_tree.root, comm_ops_node_lvl)
+        # Attribute used_datastructs.
+        used_datastructs = set()
+        kernel.used_datastructs = CodeTree.collect_referenced_datastructs(kernel.code_tree.root, used_datastructs)
         # Attribute optimization_parameters.
         kernel.optimization_parameters = deserialize_obj(kernel.optimization_parameters_serial)
-        # Attribute code_tree.
-        kernel.code_tree = deserialize_obj(kernel.code_tree_serial)
         # Attribute codegen.
         kernel.codegen = deserialize_obj(kernel.codegen_serial)
         # Attribute template.
@@ -452,18 +466,20 @@ class Kernel:
         -
         """
         yaml = self.pmodel_kernels
+        # Number of pmodel kernels.
+        num_pmodel_kernels = 1 + CodeTree.count_pmodel(self.code_tree.root)
         # No need for name affix if there is only one PModelKernel.
-        if len(yaml) == 1:
-            self.pmodel_kernels = [PModelKernel.from_yaml(yaml[0], self, self.code_tree.root)]
+        if num_pmodel_kernels == 1:
+            self.pmodel_kernels = [PModelKernel.from_yaml(yaml, self, self.code_tree.root)]
         else:
             self.pmodel_kernels = list()
-            for idx, pm_yaml in enumerate(yaml):
+            for idx in range(num_pmodel_kernels):
                 if idx == 0:
                     node = self.code_tree.root
                 else:
                     node = CodeTree.find_pmodel_node(self.code_tree.root, idx)[0]
                 assert node is not None
-                self.pmodel_kernels.append(PModelKernel.from_yaml(pm_yaml, self, node, pm_yaml['name']))
+                self.pmodel_kernels.append(PModelKernel.from_yaml(yaml, self, node, idx))
 
     def to_database(self, db_session: Session) -> 'Kernel':
         """Push this kernel object to the database.
@@ -497,6 +513,9 @@ class Kernel:
             comm_ops_node_lvl = dict()
             kernel.communicationOperationsNodeLvl = CodeTree.count_node_lvl_communication(
                 kernel.code_tree.root, comm_ops_node_lvl)
+            # ... used_datastructures.
+            used_datastructs = set()
+            kernel.used_datastructs = CodeTree.collect_referenced_datastructs(kernel.code_tree.root, used_datastructs)
             # Update serialized members.
             kernel.optimization_parameters_serial = serialize_obj(kernel.optimization_parameters)
             kernel.code_tree_serial = serialize_obj(kernel.code_tree)
@@ -542,7 +561,7 @@ class Kernel:
         if self.template.modelTool == ModelToolType.KERNCRAFT:
             # Generate pmodel codes.
             codes = KerncraftCodeGenerator().generate(self, method, ivp, system_size)
-            codes = write_codes_to_file(codes, Path('tmp'))
+            codes = write_codes_to_file(codes, Path('tmp'), num_workers=1, format_code=False)
             # Link code files to PModelKernel objects.
             for pmodel in self.pmodel_kernels:
                 pmodel_suffix = '_{}'.format(pmodel.name) if pmodel.name else ''
@@ -564,7 +583,7 @@ class Kernel:
                 raise RuntimeError('Can not generate YASKSITE code for {}: Not a stencil!'.format(ivp.name))
             # Generate Yasksite code.
             codes = YasksiteCodeGenerator().generate(self, method, ivp)
-            codes = write_codes_to_file(codes, Path('tmp'))
+            codes = write_codes_to_file(codes, Path('tmp'), num_workers=1, format_code=False)
             # Link code files to PModelKernel objects.
             for pmodel in self.pmodel_kernels:
                 pmodel_suffix = '_{}'.format(pmodel.name) if pmodel.name else ''
@@ -597,8 +616,7 @@ class Kernel:
         return KernelBenchCodeGenerator().generate(self, method, ivp)
 
     def deduce_relevant_samples(
-            self, machine: MachineState, method: Optional[ODEMethod], ivp: Optional[IVP]) -> List[
-        SampleInterval]:
+            self, machine: MachineState, method: Optional[ODEMethod], ivp: Optional[IVP]) -> List[SampleInterval]:
         """
         Deduce a set of significant sample intervals from the working sets of the pmodel kernels associated with this
         kernel. The shape of the set depends on the working set sizes as well as the characteristics of the given
@@ -742,8 +760,6 @@ class KernelRecord:
         Kernel runtime prediction.
     mode: str
         Prediction obtained in RUN or MODEL mode.
-    weight: float
-        TODO
     db_id: int
         ID of associated kernel prediction database table record.
     """
@@ -862,8 +878,6 @@ class KernelRecord:
                 # Update data record.
                 queried_record.prediction = str(prediction)
                 # queried_record.weight = weight
-                # (a) keep value of queriedRecord
-                # (b) reset to 1.0
             except NoResultFound:
                 # Insert new data record.
                 record = KernelRecord(
@@ -914,33 +928,30 @@ class KernelRecord:
         # Required ivp.db_id = -1 to include all none IVP-dependent kernels.
         if mode is None:
             if ode_size is None:
-                query = db_session.query(KernelRecord).filter(
+                query: Query = db_session.query(KernelRecord).filter(
                     KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                     KernelRecord.method.is_(method), KernelRecord.ivp.in_([ivp, -1]),
                     KernelRecord.frequency.is_(frequency), KernelRecord.cores.is_(cores)).order_by(
                     KernelRecord.kernel.asc())
             else:
-                query = db_session.query(KernelRecord).filter(
+                query: Query = db_session.query(KernelRecord).filter(
                     KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                     KernelRecord.method.is_(method), KernelRecord.ivp.in_([ivp, -1]),
                     KernelRecord.frequency.is_(frequency), KernelRecord.cores.is_(cores),
-                    KernelRecord.first <= ode_size, KernelRecord.last >= ode_size).order_by(
-                    KernelRecord.kernel.asc())
+                    KernelRecord.first <= ode_size, KernelRecord.last >= ode_size).order_by(KernelRecord.kernel.asc())
         else:
             if ode_size is None:
-                query = db_session.query(KernelRecord).filter(
+                query: Query = db_session.query(KernelRecord).filter(
                     KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                     KernelRecord.method.is_(method), KernelRecord.ivp.in_([ivp, -1]),
                     KernelRecord.frequency.is_(frequency), KernelRecord.cores.is_(cores),
                     KernelRecord.mode.is_(mode)).order_by(KernelRecord.kernel.asc())
             else:
-                query = db_session.query(KernelRecord).filter(
+                query: Query = db_session.query(KernelRecord).filter(
                     KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                     KernelRecord.method.is_(method), KernelRecord.ivp.in_([ivp, -1]),
                     KernelRecord.frequency.is_(frequency), KernelRecord.cores.is_(cores), KernelRecord.mode.is_(mode),
-                    KernelRecord.first <= ode_size, KernelRecord.last >= ode_size).order_by(
-                    KernelRecord.kernel.asc())
-                # KernelRecord.first >= ode_size, KernelRecord.last <= ode_size).all() #TODO
+                    KernelRecord.first <= ode_size, KernelRecord.last >= ode_size).order_by(KernelRecord.kernel.asc())
         return read_sql_query(query.statement, db_session.bind)
 
     @staticmethod
@@ -986,10 +997,10 @@ class KernelRecord:
             if sample_types is None:
                 data = db_session.query(KernelRecord).filter(
                     KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine),
-                    KernelRecord.compiler.is_(compiler),
-                    KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp), KernelRecord.frequency.is_(frequency),
-                    KernelRecord.cores.in_((c for c in range(1, max_cores + 1))), KernelRecord.first.is_(ode_size),
-                    KernelRecord.last.is_(ode_size), KernelRecord.mode.is_(mode)).all()
+                    KernelRecord.compiler.is_(compiler), KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp),
+                    KernelRecord.frequency.is_(frequency), KernelRecord.cores.in_((c for c in range(1, max_cores + 1))),
+                    KernelRecord.first.is_(ode_size), KernelRecord.last.is_(ode_size),
+                    KernelRecord.mode.is_(mode)).all()
                 return bool(len(data) == max_cores)
             # Include only data for the specified sample types.
             data = db_session.query(KernelRecord).filter(
@@ -1005,16 +1016,16 @@ class KernelRecord:
             data = db_session.query(KernelRecord).filter(
                 KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                 KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp), KernelRecord.frequency.is_(frequency),
-                KernelRecord.cores.in_((c for c in range(1, max_cores + 1))),
-                KernelRecord.mode.is_(mode)).order_by(KernelRecord.cores.asc(), KernelRecord.first.asc()).all()
+                KernelRecord.cores.in_((c for c in range(1, max_cores + 1))), KernelRecord.mode.is_(mode)).order_by(
+                KernelRecord.cores.asc(), KernelRecord.first.asc()).all()
         else:
             # Include only data for the specified sample types.
             data = db_session.query(KernelRecord).filter(
                 KernelRecord.kernel.is_(kernel), KernelRecord.machine.is_(machine), KernelRecord.compiler.is_(compiler),
                 KernelRecord.method.is_(method), KernelRecord.ivp.is_(ivp), KernelRecord.frequency.is_(frequency),
-                KernelRecord.cores.in_((c for c in range(1, max_cores + 1))),
-                KernelRecord.mode.is_(mode), KernelRecord.sample_type.in_(sample_types)).order_by(
-                KernelRecord.cores.asc(), KernelRecord.first.asc(), ).all()
+                KernelRecord.cores.in_((c for c in range(1, max_cores + 1))), KernelRecord.mode.is_(mode),
+                KernelRecord.sample_type.in_(sample_types)).order_by(KernelRecord.cores.asc(),
+                                                                     KernelRecord.first.asc(), ).all()
         if not data:
             return False
         # Check if data for all possible ODE sizes is available.
@@ -1079,7 +1090,7 @@ class PModelKernel:
                      sqlite_autoincrement=True)
 
     @classmethod
-    def from_yaml(cls, yaml: Dict, kernel: Kernel, pmodel_node: CodeNode, name: str = '') -> 'PModelKernel':
+    def from_yaml(cls, yaml: Dict, kernel: Kernel, pmodel_node: CodeNode, idx: Optional[int] = None) -> 'PModelKernel':
         """Construct PModelKernel object from YAML definition.
 
         Parameters:
@@ -1098,7 +1109,6 @@ class PModelKernel:
         PModelKernel
             Created PModelObject object.
         """
-        config: Config = offsite.config.offsiteConfig
         # Attribute iterations.
         iterations: str
         # Compute iteration count.
@@ -1122,10 +1132,57 @@ class PModelKernel:
             iterations = '{} * n'.format(iterations) if iterations != '' else 'n'
         else:
             assert False
-        #
         iterations = eval_math_expr(iterations, cast_to=str)
+
         # Attribute working_sets.
-        working_sets: List[str] = [ws for ws in yaml['working sets']]
+        # ... first define helper function that adds path to the root node.
+        def _nodes_to_root(cur_root):
+            assert cur_root is not None
+            cur = cur_root
+            if cur.prev is not None:
+                cur = cur.prev
+                assert cur
+                while True:
+                    if cur.prev is None:
+                        break
+                    cur = cur.prev
+            new_root = deepcopy(cur.parent)
+            if new_root is None:
+                if cur_root.type is not CodeNodeType.ROOT:
+                    new_root = RootNode(0, CodeNodeType.ROOT, None, None, None, cur_root, 'new_root')
+                    cur_root.parent = new_root
+                    return new_root
+                return cur_root
+            new_root.next = None
+            new_root.child = cur_root
+            cur_root.parent = new_root
+            return _nodes_to_root(new_root)
+
+        # ...
+        name: str = '' if idx is None else str(idx + 1)
+        idx: int = 0 if idx is None else idx
+        #  ... compute working sets next.
+        try:
+            # We only support automatic working set derivation for kerncraft kernels at this point.
+            # Otherwise, raise an index error exception to continue.
+            if kernel.template.modelTool != ModelToolType.KERNCRAFT:
+                raise IndexError('Warning: Automatic derivation of working sets is only supported for kernels that'
+                                 'use model tool \'{}\'. Next, try to read working sets from the kernel\'s YAML'
+                                 'description file...')
+            # Prepend nodes on path from pmodel node to root node to include all required loops.
+            root = deepcopy(pmodel_node)
+            root = _nodes_to_root(root)
+            # Compute working sets.
+            cr = CountReferences()
+            ws = cr.compute_working_sets(root, kernel.template.codegen)
+            working_sets: List[str] = list(set(ws))
+        except IndexError as err_idx:
+            try:
+                working_sets: List[str] = [ws for ws in yaml['pmodel'][idx]['working sets']]
+            except KeyError:
+                print(err_idx)
+                raise RuntimeError('Error: Unable to load working set from the kernel\'s YAML description: {}.'.format(
+                    kernel.name))
         # Create object.
         return cls(kernel, iterations, working_sets, name)
 
@@ -1271,7 +1328,7 @@ class PModelKernel:
             step = int(size / config.samples_per_interval)
             remain = size % config.samples_per_interval
             #
-            if size >= 10 * config.samples_per_interval:  # TODO don't split too slow intervals
+            if size >= 10 * config.samples_per_interval:
                 nothing_added = True
                 my_start = start
                 my_end = my_start + step
@@ -1287,8 +1344,7 @@ class PModelKernel:
                         my_start = my_end + 1
                         my_end = my_start + step
                     else:
-                        # Unable to determine sample point point for current interval. Hence, we increase the end
-                        # value.
+                        # Unable to determine sample point for current interval. Hence, we increase the end value.
                         my_end = my_end + step
                 if nothing_added:
                     # Unable to determine any sample point at all for the given interval! Hence, instead incorporate
@@ -1322,8 +1378,8 @@ class PModelKernel:
         samples.sort(key=lambda x: x.first)
         return samples
 
-    def determine_samples_for_yasksite_mode(self, machine: MachineState, ivp: Optional[IVP] = None) -> List[
-        SampleInterval]:
+    def determine_samples_for_yasksite_mode(
+            self, machine: MachineState, ivp: Optional[IVP] = None) -> List[SampleInterval]:
         """
         Determine a list of significant IVP system size sample intervals and points for this object. These samples are
         then used to obtain performance predictions for this object.
@@ -1345,7 +1401,7 @@ class PModelKernel:
         # Create SampleInterval objects.
         samples = list()
         # Define cut-off sample size and sample multiplier.
-        cut_off_n = 50  # TODO: add as parameter to config?!
+        cut_off_n = 50
         cut_off_n = eval_math_expr(ivp.ivp_size(), [ivp_grid_size(cut_off_n)], cast_to=int)
         multiplier = 1.1 ** ivp.characteristic.stencil_dim
         # Compute layer of the stencil.
@@ -1424,6 +1480,8 @@ class PModelKernel:
         # Determine the maximum system size 'n' that still fits into that level and working set.
         max_ns = list()
         for wset in self.workingSets:
+            if 'n' not in wset:
+                continue
             # Solve equation 'wset = avail_cache * cache'.
             solution: str = solve_equation(wset, '{}*{}'.format(avail_cache_size, cache_elements), 'n', constants)
             # Get end from the solution of the equation

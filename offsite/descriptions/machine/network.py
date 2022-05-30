@@ -1,5 +1,7 @@
 """@package descriptions.machine.network
 Definition of class NetworkConfiguration.
+
+@author: Hana Shatri, Johannes Seiferth
 """
 
 from datetime import datetime

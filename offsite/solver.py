@@ -1,5 +1,7 @@
 """@package solver
 Definition of class Solver.
+
+@author: Johannes Seiferth
 """
 
 from datetime import datetime
@@ -7,7 +9,7 @@ from getpass import getuser
 from typing import List
 
 import attr
-from sqlalchemy import Column, DateTime, Enum, Integer, String, Table
+from sqlalchemy import Column, DateTime, Enum, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from offsite import __version__
@@ -26,6 +28,7 @@ class Solver:
     db_id: int
         ID of associated solver database table record.
     """
+    name = attr.ib(type=str)
     type = attr.ib(type=SolverType, default=SolverType.GENERIC)
     specific_tables = attr.ib(type=List[SolverSpecificTableType], default=[])
     specific_tables_serial = attr.ib(type=str, init=False)
@@ -34,11 +37,13 @@ class Solver:
     # Database information.
     db_table = Table('solver', METADATA,
                      Column('db_id', Integer, primary_key=True),
+                     Column('name', String),
                      Column('type', Enum(SolverType)),
                      Column('specific_tables_serial', String),
                      Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
+                     UniqueConstraint('name'),
                      sqlite_autoincrement=True)
 
     def to_database(self, db_session: Session) -> 'Solver':
@@ -73,9 +78,9 @@ class Solver:
         return self
 
     @classmethod
-    def make_solver(cls, type_str: str):
+    def make_solver(cls, name_str: str, type_str: str):
         if type_str == SolverType.ODE.value:
-            return cls(
-                type=SolverType.ODE, specific_tables=[SolverSpecificTableType.IVP, SolverSpecificTableType.ODE_METHOD])
+            return cls(name=name_str, type=SolverType.ODE,
+                       specific_tables=[SolverSpecificTableType.IVP, SolverSpecificTableType.ODE_METHOD])
         else:
-            return cls()
+            return cls(name=name_str, type=SolverType.GENERIC)

@@ -1,0 +1,1591 @@
+"""@package apps.offsite_gensolver
+Main script of the offsite_gensolver application.
+
+@author: Johannes Seiferth
+"""
+
+from argparse import ArgumentParser, Namespace
+from os import system
+from re import sub
+from typing import List, Optional, Tuple, Union
+
+from pathlib2 import Path
+from sqlalchemy.orm import Session
+
+import offsite.config
+from offsite import __version__
+from offsite.apps.offsite_rank import create_rankings_ode
+from offsite.config import __config_ext__, init_config, Config
+from offsite.database import close, commit, open_db
+from offsite.database.db_mapping import mapping
+from offsite.descriptions.impl.impl_skeleton import ImplSkeleton
+from offsite.descriptions.machine import Compiler, MachineState
+from offsite.descriptions.ode import IVP, ODEMethod, ivp_grid_size
+from offsite.ranking.ranking import RankingRecord
+from offsite.ranking.ranking_task import parse_ranking_task
+from offsite.train.impl_variant import ImplVariant
+from offsite.util.math_utils import eval_math_expr, solve_equation
+
+
+def parse_program_args_app_gensolver() -> Namespace:
+    """Parse the passed program arguments.
+
+    Parameters:
+    -----------
+    -
+
+    Returns:
+    --------
+    argparse.Namespace
+        Parsed program arguments.
+    """
+    # Create argument parser object.
+    parser = ArgumentParser(
+        description='Generate an ODE solver which can be further enhanced with loop_adapt-based online'
+                    'tuning capabilities.')
+    # General options.
+    parser.add_argument('-v', '--version', action='version', version='%(prog)s {}'.format(__version__),
+                        help='Print program version and exit.')
+    parser.add_argument('--verbose', action='store_true', default=False, help='Print further information on this run.')
+    parser.add_argument('--config', action='store', type=Path,
+                        help='Customize autotuning process by passing a configuration ({}) file'.format(__config_ext__))
+    # Options: database.
+    parser.add_argument('--db', action='store', required=True, help='Path to used database.')
+    # Options: ODE system and integration interval.
+    parser.add_argument('-N', help='Grid dimension of ODE solved.', type=int, required=True)
+    parser.add_argument('-t0', help='Start time integration interval.', type=float, required=True)
+    parser.add_argument('-te', help='End time integration interval.', type=float, required=True)
+    parser.add_argument('-h0', help='Initial stepsize.', type=float, default=1e-3)
+    # Options: Execution mode.
+    parser.add_argument('--no_openmp', help='Sequential execution. OpenMP is used by default.', action='store_true',
+                        default=False)
+    parser.add_argument('--threads', help='Number of threads executed.', type=int, required=True)
+    # Options: Included implementation variants.
+    parser.add_argument('--rank', help='TODO', type=str, required=False, default=None)
+    # Options: MachineState and compiler.
+    parser.add_argument('--machine',
+                        help='Path to description of the machine state used. Optional argument which, however, is '
+                             'mandatory when using additional option --rank.', type=Path, required=False)
+    parser.add_argument('--compiler', help='Used compiler. Default compiler: icc', type=str, required=False,
+                        default='icc')
+    # Options: ODE solver.
+    parser.add_argument('--sampling', help='Use variant sampling to determine fastest implementation variant.',
+                        action='store_true', default=False)
+    parser.add_argument('--warmup', help='Execute warmup steps before variant sampling.', type=int)
+    # parser.add_argument('--cancel', help='Use step cancellation during variant sampling.', action='store_true',
+    #                    default=False)
+    # Options: Online tuning.
+    parser.add_argument('--online', help='Activate further online tuning capabilities by enabling loop_adapt.',
+                        action='store_true', default=False)
+    # Options: Tiling variants.
+    parser.add_argument('--tile', help='', action='store_true', default=False)
+    # Parse arguments.
+    return parser.parse_args()
+
+
+def verify_program_args_app_gensolver():
+    config: Config = offsite.config.offsiteConfig
+    if config.args.machine is not None or config.args.compiler is not None:
+        if config.args.compiler is None:
+            raise RuntimeError('Missing program argument --compiler required by --machine!')
+        if config.args.machine is None:
+            raise RuntimeError('Missing program argument --machine required by --compiler!')
+
+
+def write_utility_headers(machine_id: int):
+    def write_alloc():
+        path = Path('include/alloc.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#define ALIGNMENT 32\n')
+            fh.write('#define PAD_SIZE 256\n')
+            fh.write('\n')
+            fh.write(
+                '#define ALIGN(X) ((unsigned long)((((X) + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT) % 256 < ALIGNMENT ? ((((X) + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT) + ALIGNMENT : ((((X) + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT))\n')
+            fh.write('\n')
+            fh.write('#include <assert.h>\n')
+            fh.write('#include <stdlib.h>\n')
+            fh.write('\n')
+            fh.write('static double *alloc1d(size_t a) {\n')
+            fh.write('\treturn (double *) aligned_alloc(ALIGNMENT, a * sizeof(double));\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static double **alloc2d(size_t a, size_t b) {\n')
+            fh.write('\tsize_t row_size, row_count;\n')
+            fh.write('\tdouble **x;\n')
+            fh.write('\n')
+            fh.write('\trow_size = ALIGN(b * sizeof(double));\n')
+            fh.write('\trow_count = row_size / sizeof(double);\n')
+            fh.write('\n')
+            fh.write('\tx = (double **) aligned_alloc(ALIGNMENT, a * sizeof(double *));\n')
+            fh.write('\tx[0] = (double *) aligned_alloc(ALIGNMENT, a * row_size);\n')
+            fh.write('\n')
+            fh.write('\tfor (size_t i = 1; i < a; i++)\n')
+            fh.write('\t\tx[i] = x[0] + i * row_count;\n')
+            fh.write('\treturn x;\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static double ***alloc3d(size_t a, size_t b, size_t c) {\n')
+            fh.write('\tsize_t row_size, row_count;\n')
+            fh.write('\tdouble ***x;\n')
+            fh.write('\tassert((ALIGNMENT % sizeof(double)) == 0);\n')
+            fh.write('\n')
+            fh.write('\trow_size = ALIGN(c * sizeof(double));\n')
+            fh.write('\trow_count = row_size / sizeof(double);\n')
+            fh.write('\n')
+            fh.write('\tx = (double ***) aligned_alloc(ALIGNMENT, a * sizeof(double **));\n')
+            fh.write('\tx[0] = (double **) aligned_alloc(ALIGNMENT, a * b * sizeof(double *));\n')
+            fh.write('\tx[0][0] = (double *) aligned_alloc(ALIGNMENT, a * b * row_size);\n')
+            fh.write('\n')
+            fh.write('\tfor (size_t i = 1; i < a; i++)\n')
+            fh.write('\t\tx[i] = x[0] + i * b;\n')
+            fh.write('\n')
+            fh.write('\tfor (size_t i = 1; i < a * b; i++)\n')
+            fh.write('\t\tx[0][i] = x[0][0] + i * row_count;\n')
+            fh.write('\treturn x;\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static void free1d(double *p) {\n')
+            fh.write('\tfree((void *) p);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static void free2d(double **p) {\n')
+            fh.write('\tfree((void *) p[0]);\n')
+            fh.write('\tfree((void *) p);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static void free3d(double ***p) {\n')
+            fh.write('\tfree((void *) p[0][0]);\n')
+            fh.write('\tfree((void *) p[0]);\n')
+            fh.write('\tfree((void *) p);\n')
+            fh.write('}\n')
+
+    write_alloc()
+
+    def write_config_sampling():
+        path = Path('include/config_sampling.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('#define MAX_SAMPLE_RUNS 3\n')
+            fh.write('#define SAMPLING_STOP_FACTOR 1.05\n')
+            fh.write('#endif\n')
+
+    write_config_sampling()
+
+    def write_data_distribution():
+        path = Path('include/data_distribution.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#ifdef _OPENMP\n')
+            fh.write('#include <omp.h>\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('class DataDistribution {\n')
+            fh.write('public:\n')
+            fh.write('\n')
+            fh.write('\tDataDistribution(const int n)\n')
+            fh.write('\t\t: _me(\n')
+            fh.write('#ifdef _OPENMP\n')
+            fh.write('\t\tomp_get_thread_num()\n')
+            fh.write('#else\n')
+            fh.write('\t\t0\n')
+            fh.write('#endif\n')
+            fh.write('\t),\n')
+            fh.write('\t\t_first(_me * n / THREADS), _last((_me + 1) * n / THREADS - 1) {\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\t~DataDistribution() {}\n')
+            fh.write('\n')
+            fh.write('\tconst int _me;\n')
+            fh.write('\tconst int _first;\n')
+            fh.write('\tconst int _last;\n')
+            fh.write('};\n')
+
+    write_data_distribution()
+
+    def write_error():
+        path = Path('include/error.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <iostream>\n')
+            fh.write('#include <string>\n')
+            fh.write('\n')
+            fh.write('#define DRIVER_SUCCESS 1\n')
+            fh.write('#define DRIVER_FAILURE 0\n')
+            fh.write('\n')
+            fh.write('#define STEP_SUCCESS 1\n')
+            fh.write('#define STEP_CANCEL 0\n')
+            fh.write('#define STEP_FAILURE -1\n')
+            fh.write('\n')
+            fh.write('static inline void exit_failure(const std::string &error_msg) {\n')
+            fh.write('\tstd::cerr << "Error: " << error_msg << std::endl;\n')
+            fh.write('\tstd::exit(DRIVER_FAILURE);\n')
+            fh.write('}\n')
+
+    write_error()
+
+    def write_global(machine_id: int):
+        path = Path('include/global.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#define MACHINE {}\n'.format(machine_id))
+            fh.write('\n')
+            fh.write('double H;\n')
+            fh.write('int steps;\n')
+
+    write_global(machine_id)
+
+    def write_progress():
+        path = Path('include/progress.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('int percent = 0;\n')
+            fh.write('\n')
+            # function print_pitch_line.
+            fh.write('void print_pitch_line() {\n')
+            fh.write('\tint i;\n')
+            fh.write('\tfor (i = 1; i <= 100; i++) {\n')
+            fh.write('\t\tif (i % 10 == 0)\n')
+            fh.write('\t\t\tprintf(",");\n')
+            fh.write('\t\telse\n')
+            fh.write('\t\t\tprintf("_");\n')
+            fh.write('\t}\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # function show_progress.
+            fh.write('void show_progress(double t, double h, const double H) {\n')
+            fh.write('\tint i;\n')
+            fh.write('\tint percent_new = (int) ((t - t0) / H * 100.0);\n')
+            fh.write('\tif (percent_new != percent) {\n')
+            fh.write('\t\tdouble step_ratio = h / H;\n')
+            fh.write('\t\tfor (i = percent + 1; i <= percent_new; i++) {\n')
+            fh.write('\t\tif (step_ratio >= 1e-4)\n')
+            fh.write('\t\tprintf("`");\n')
+            fh.write('\t\telse if (step_ratio >= 1e-5)\n')
+            fh.write('\t\tprintf("+");\n')
+            fh.write('\t\telse if (step_ratio >= 1e-6)\n')
+            fh.write('\t\tprintf("*");\n')
+            fh.write('\t\telse if (step_ratio >= 1e-7)\n')
+            fh.write('\t\tprintf("#");\n')
+            fh.write('\t\telse\n')
+            fh.write('\t\tprintf("!");\n')
+            fh.write('\t}\n')
+            fh.write('\tfflush(stdout);\n')
+            fh.write('\tpercent = percent_new;\n')
+            fh.write('\t}\n')
+            fh.write('}\n')
+            # function show_completion.
+            fh.write('void show_completion() {\n')
+            fh.write('\tint i;\n')
+            fh.write('\tfor (i = percent + 1; i <= 100; i++)\n')
+            fh.write('\t\tprintf("`");\n')
+            fh.write('}\n')
+
+    write_progress()
+
+    def write_step_cancellation():
+        path = Path('include/step_cancellation.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <timesnap.hpp>\n')
+            fh.write('\n')
+            fh.write('#define STEP_CANCELLATION_START() \\\n')
+            fh.write('\ttime_snap_t ts; \\\n')
+            fh.write('\t_Pragma("omp master") \\\n')
+            fh.write('\t\ttime_snap_start(&ts);\n')
+            fh.write('\n')
+            fh.write('#define STEP_CANCELLATION_STOP() \\\n')
+            fh.write('\tdouble *T; \\\n')
+            fh.write('\tint cancel; \\\n')
+            fh.write('\t_Pragma("omp single copyprivate(T)") \\\n')
+            fh.write('\t{ \\\n')
+            fh.write('\t\tT = (double *)malloc(sizeof(double)); \\\n')
+            fh.write('\t} \\\n')
+            fh.write('\t_Pragma("omp master") \\\n')
+            fh.write('\t{ \\\n')
+            fh.write('\t\t*T = time_snap_stop(&ts) / 1e9; \\\n')
+            fh.write('\t} \\\n')
+            fh.write('\t_Pragma("omp barrier") \\\n')
+            fh.write('\t\tcancel = (m * (*T) > T_best_impl) ? 1 : 0; \\\n')
+            fh.write('\t_Pragma("omp barrier") if (cancel == 1) \\\n')
+            fh.write('\t{ \\\n')
+            fh.write('\t\t_Pragma("omp single nowait")\\\n')
+            fh.write('\t\t\tfree(T); \\\n')
+            fh.write('\t\treturn STEP_CANCEL; \\\n')
+            fh.write('\t}\n')
+
+    # write_step_cancellation()
+
+    def write_timesnap():
+        path = Path('include/timesnap.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <stdint.h>\n')
+            fh.write('#include <sys/time.h>\n')
+            fh.write('\n')
+            fh.write('typedef struct timeval time_snap_t;\n')
+            fh.write('\n')
+            fh.write('#define init_time_snap()\n')
+            fh.write('\n')
+            fh.write('static inline void time_snap_start(time_snap_t *ts) {\n')
+            fh.write('\tgettimeofday(ts, 0);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('static inline uint64_t time_snap_stop(const time_snap_t *ts1) {\n')
+            fh.write('\ttime_snap_t ts2;\n')
+            fh.write('\tgettimeofday(&ts2, 0);\n')
+            fh.write(
+                '\treturn ((uint64_t)(ts2.tv_sec - ts1->tv_sec) * 1000000 + (uint64_t) ts2.tv_usec - (uint64_t) ts1->tv_usec) * 1000;\n')
+            fh.write('}\n')
+
+    write_timesnap()
+
+
+def write_datastructs_header(skeletons: List[str]):
+    assert len(skeletons) > 0
+    Path("include/datastructures").mkdir(parents=True, exist_ok=True)
+    path = Path('include/datastructures/data_struct.hpp')
+    with path.open('w') as fh:
+        fh.write('// -----------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+        fh.write('\n')
+        fh.write('// -----------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('#pragma once\n')
+        fh.write('\n')
+        fh.write('#include <alloc.hpp>\n')
+        fh.write('\n')
+        for skeleton in skeletons:
+            fh.write('#include "DS_{}.h"\n'.format(skeleton))
+        fh.write('\n')
+        # Write enum class.
+        fh.write('enum class DataStructType {\n')
+        for skeleton in skeletons:
+            fh.write('\tDS_{},\n'.format(skeleton))
+        fh.write('};\n\n')
+        fh.write('typedef struct {\n')
+        fh.write('\tDataStructType type;\n')
+        fh.write('\tvoid *ds;\n')
+        fh.write('} ds_t;\n')
+
+
+def query_tuning_scenario(machine: MachineState) -> Union[str, str, List[str], str]:
+    args: Namespace = offsite.config.offsiteConfig.args
+    # Fetch data from database.
+    db_session: Session = open_db(args.db)
+    ivps = db_session.query(IVP).all()
+    assert (len(ivps) > 0)
+    methods = db_session.query(ODEMethod).all()
+    assert (len(methods) > 0)
+
+    # Query IVP.
+    ivp_ids = list()
+    select_str = 'Select IVP: (specify number)\n'
+    for ivp in ivps:
+        select_str += ' *  ({})  {}\n'.format(ivp.db_id, ivp.name)
+        ivp_ids.append(ivp.db_id)
+    # Select the used IVP.
+    ipt_id = -1
+    while ipt_id not in ivp_ids:
+        ipt = input(select_str)
+        try:
+            ipt_id = int(ipt)
+            if ipt_id not in ivp_ids:
+                print('Input out of valid range!')
+        except:
+            print('Invalid input! Not a valid number!')
+    ivp: IVP = next(x for x in ivps if x.db_id == ipt_id)
+    ivp_name: str = ivp.name
+
+    # Query ODE method.
+    method_ids = list()
+    select_str = 'Select ODE method: (specify number)\n'
+    for method in methods:
+        select_str += ' *  ({})  {}\n'.format(method.db_id, method.name)
+        method_ids.append(method.db_id)
+    # Select the used ODE method.
+    ipt_id = -1
+    while ipt_id not in method_ids:
+        ipt = input(select_str)
+        try:
+            ipt_id = int(ipt)
+            if ipt_id not in method_ids:
+                print('Input out of valid range!')
+        except:
+            print('Invalid input! Not a valid number!')
+    method: ODEMethod = next(x for x in methods if x.db_id == ipt_id)
+    method_name: str = method.name
+
+    # Query the included implementation variants ...
+    if args.rank is None:
+        variants = db_session.query(ImplVariant.db_id, ImplVariant.skeleton).all()
+        # Query names of impl skeletons.
+        skeletons = set([x[1] for x in variants])
+        skeletons = [ImplSkeleton.fetch_impl_skeleton_name(db_session, x) for x in skeletons]
+        skeletons.sort()
+        # Query IDs of impl variants.
+        variants = ','.join([str(x[0]) for x in variants])
+    # Include only the ranked impl variants.
+    else:
+        # Create ranking.
+        task = parse_ranking_task(args.rank)
+        ode_size = eval_math_expr(solve_equation('g', ivp.gridSize, 'n')[0], [ivp_grid_size(args.N)], cast_to=int)
+        create_rankings_ode(db_session, machine, [method], [ivp], [task], ode_size)
+        commit(db_session)
+        # Query IDs of the ranked impl variants.
+        variants = db_session.query(RankingRecord.variants_serial).filter(
+            RankingRecord.machine.is_(machine.db_id), RankingRecord.compiler.is_(machine.compiler.db_id),
+            RankingRecord.method.is_(method.db_id), RankingRecord.ivp.is_(ivp.db_id),
+            RankingRecord.cores.is_(args.threads), RankingRecord.frequency.is_(machine.clock),
+            RankingRecord.rankCriteria.is_(task.type), RankingRecord.cutoffCriteria.is_(task.cutoff_criteria),
+            RankingRecord.cutoffValue.is_(task.cutoff_value)).all()[0][0]
+        variant_ids = variants.split(',')
+        # Query names of impl skeletons.
+        skeletons = db_session.query(ImplVariant.skeleton).filter(ImplVariant.db_id.in_(variant_ids)).distinct().all()
+        skeletons = [x[0] for x in skeletons]
+        skeletons = [ImplSkeleton.fetch_impl_skeleton_name(db_session, x) for x in skeletons]
+        skeletons.sort()
+
+    assert (len(variants) > 0)
+    close(db_session)
+
+    return ivp_name, method_name, skeletons, variants
+
+
+def fetch_machine_state() -> Tuple[MachineState, str]:
+    args: Namespace = offsite.config.offsiteConfig.args
+    # Fetch machine state information from database/YAML.
+    db_session: Session = open_db(args.db)
+    if args.machine is not None and args.machine.is_file() and args.machine.suffix in ['.yaml', '.yml']:
+        machine = MachineState.from_yaml(args.machine, args.compiler)
+        machine = machine.to_database(db_session)
+    else:
+        machines = db_session.query(MachineState).all()
+        assert (len(machines) > 0)
+        compilers = db_session.query(Compiler).all()
+        assert (len(compilers) > 0)
+        # Query MachineStates.
+        machine_ids = list()
+        select_str = 'Select MachineState: (specify number)\n'
+        for machine in machines:
+            select_str += ' *  ({})  {}\n'.format(machine.db_id, machine.name)
+            machine_ids.append(machine.db_id)
+        # Select the used MachineState.
+        ipt_id = -1
+        while ipt_id not in machine_ids:
+            ipt = input(select_str)
+            try:
+                ipt_id = int(ipt)
+                if ipt_id not in machine_ids:
+                    print('Input out of valid range!')
+            except:
+                print('Invalid input! Not a valid number!')
+        machine_id = ipt_id
+        # Query compilers.
+        compilers_ids = list()
+        select_str = 'Select compiler: (specify number)\n'
+        for compiler in compilers:
+            select_str += ' *  ({})  {}\n'.format(compiler.db_id, compiler.name)
+            compilers_ids.append(compiler.db_id)
+        # Select the used compiler.
+        ipt_id = -1
+        while ipt_id not in compilers_ids:
+            ipt = input(select_str)
+            try:
+                ipt_id = int(ipt)
+                if ipt_id not in compilers_ids:
+                    print('Input out of valid range!')
+            except:
+                print('Invalid input! Not a valid number!')
+        compiler_id = ipt_id
+        machine = MachineState.select(db_session, machine_id, compiler_id)
+    close(db_session)
+
+    # Determine the used compiler flags.
+    flags = machine.compiler.flags
+    if args.no_openmp:
+        # Remove all OpenMP related flags.
+        flags = sub(r'-[a-z]openmp', '', flags)
+    elif '-qopenmp' not in flags:
+        flags += ' -qopenmp'
+    return machine, flags
+
+
+def generate_impl_variant_codes(ivp: str, method: str, variants: str, machine: Optional[MachineState] = None,
+                                rank: Optional[str] = None, ode_size: Optional[int] = None):
+    assert (machine is None and rank is None and ode_size is None) or \
+           (machine is not None and rank is not None and ode_size is not None)
+    db_path: Path = offsite.config.offsiteConfig.args.db
+
+    cmd_args = '--mode CPP --db {} --verbose'.format(db_path)
+    cmd_args += ' --ivp {} --method {} --variants {}'.format(ivp, method, variants)
+    cmd_args += ' --folder_ds {} --folder_ivp {} --folder_method {} --folder_impl {}'.format(
+        'include/datastructures', 'include/ivps', 'include/methods', 'src/variants')
+    if offsite.config.offsiteConfig.args.tile:
+        cmd_args += ' --tile'
+    if rank and machine and ode_size:
+        cmd_args += ' -- rank {} --machine --compiler {} -n {}'.format(
+            rank, machine.path, machine.compiler.name, ode_size)
+    system('offsite_codegen {}'.format(cmd_args))
+
+
+def write_impl_variant(skeletons: List[str]):
+    assert len(skeletons) > 0
+
+    def write_impl_variant_header():
+        path = Path('include/impl_variant.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <datastructures/data_struct.hpp>\n')
+            fh.write('#include <error.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <dlfcn.h>\n')
+            fh.write('#include <filesystem>\n')
+            fh.write('#include <string>\n')
+            fh.write('\n')
+            # fh.write('#ifndef STEP_CANCELLATION\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write(
+                    'typedef int (*step_t)(const int me, const int first, const int last, double t, double h, int B, double *y, void *ds);\n')
+            else:
+                fh.write(
+                    'typedef int (*step_t)(const int me, const int first, const int last, double t, double h, double *y, void *ds);\n')
+            # fh.write('#else\n')
+            # fh.write(
+            #    'typedef int (*step_t)(const int me, const int first, const int last, double t, double h, double *y, void *ds, double T_best_impl);\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            # Class Stepper.
+            fh.write('class Stepper {\n')
+            fh.write('public:\n')
+            fh.write('\tStepper(const std::string &path, const DataStructType &ds)\n')
+            fh.write('\t\t: _path(path), _ds(ds), _step_func(nullptr) {}\n')
+            fh.write('\n')
+            fh.write('\t~Stepper() {}\n')
+            fh.write('\n')
+            fh.write('\tconst std::string _path;\n')
+            fh.write('\tconst DataStructType _ds;\n')
+            fh.write('\n')
+            fh.write('\tvoid step_func(void *func) {\n')
+            fh.write('\t\t_step_func = func;\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tfriend class ImplVariant;\n')
+            fh.write('\n')
+            fh.write('private:\n')
+            fh.write('\tvoid *_step_func;\n')
+            fh.write('};\n')
+            fh.write('\n')
+            # Class ImplVariant.
+            fh.write('class ImplVariant {\n')
+            fh.write('public:\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write(
+                    '\tImplVariant(const std::string &name, const int db_id, const std::string &step_path, const DataStructType &step_ds, const int block_size)\n')
+                fh.write('\t\t: _name(name), _db_id(db_id), _stepper(step_path, step_ds), _block_size(block_size) {\n')
+            else:
+                fh.write(
+                    '\tImplVariant(const std::string &name, const int db_id, const std::string &step_path, const DataStructType &step_ds)\n')
+                fh.write('\t\t: _name(name), _db_id(db_id), _stepper(step_path, step_ds) {\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\t~ImplVariant() {\n')
+            fh.write('\t\tstd::filesystem::path obj = _stepper._path + "/" + _name + ".o";\n')
+            fh.write('\t\tstd::filesystem::remove(obj);\n')
+            fh.write('\t\tstd::filesystem::path sobj = _stepper._path + "/" + _name + ".so";\n')
+            fh.write('\t\tstd::filesystem::remove(sobj);\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tvoid compile(const std::string &cmd_obj, const std::string &cmd_sobj) {\n')
+            fh.write('\t\tstd::string basename = _stepper._path + _name;\n')
+            fh.write('\t\tstd::string cname = basename + ".c";\n')
+            fh.write('\t\tstd::string objname = basename + ".o";\n')
+            fh.write('\t\tstd::string sobjname = basename + ".so";\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\t\tstd::cout << "Implementation variant: " << _name << std::endl;\n')
+            fh.write('\t\tstd::cout << " * base name          = " << basename << std::endl;\n')
+            fh.write('\t\tstd::cout << " * c name             = " << cname << std::endl;\n')
+            fh.write('\t\tstd::cout << " * object name        = " << objname << std::endl;\n')
+            fh.write('\t\tstd::cout << " * shared object name = " << sobjname << std::endl;\n')
+            fh.write('\t\tstd::cout << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t\tstd::string cmd_obj_impl = cmd_obj + " " + cname + " -o " + objname;\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\t\tstd::cout << "Compiling object ... " << std::endl;\n')
+            fh.write('\t\tstd::cout << cmd_obj_impl << std::endl;\n')
+            fh.write('\t\tstd::cout << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\t\tsystem(cmd_obj_impl.c_str());\n')
+            fh.write('\n')
+            fh.write('\tstd::string cmd_sobj_impl = cmd_sobj + " " + objname + " -o " + sobjname;\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\t\tstd::cout << "Compiling shared object ... " << std::endl;\n')
+            fh.write('\t\tstd::cout << cmd_sobj_impl << std::endl;\n')
+            fh.write('\t\tstd::cout << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\t\tsystem(cmd_sobj_impl.c_str());\n')
+            fh.write('\n')
+            fh.write('\t\tauto sobj = dlopen(sobjname.c_str(), RTLD_NOW);\n')
+            fh.write('\t\tif (!sobj) {\n')
+            fh.write('\t\t\texit_failure("dlopen failed! : " + std::string(dlerror()));\n')
+            fh.write('\t\t}\n')
+            fh.write('\t\t_stepper._step_func = sobj;\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tstep_t link() const {\n')
+            fh.write('\t\tstep_t step = (step_t) dlsym(_stepper._step_func, "step");\n')
+            fh.write('\t\tif (!step) {\n')
+            fh.write('\t\t\texit_failure("dlsym failed! : " + std::string(dlerror()));\n')
+            fh.write('\t\t}\n')
+            fh.write('\t\treturn step;\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tds_t alloc_data_structures(const int n, const int s, ds_t &handle);\n')
+            fh.write('\tvoid free_data_structures(ds_t &handle);\n')
+            fh.write('\n')
+            fh.write('\tDataStructType ds_type() const {\n')
+            fh.write('\t\treturn _stepper._ds;\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tconst std::string _name;\n')
+            fh.write('\tint _db_id;\n')
+            fh.write('\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('\tint _block_size;\n')
+                fh.write('\n')
+            fh.write('private:\n')
+            fh.write('\tStepper _stepper;\n')
+            fh.write('};\n')
+
+    write_impl_variant_header()
+
+    def write_impl_variant_src():
+        path = Path('src/impl_variant.cpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#include <impl_variant.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <alloc.hpp>\n')
+            fh.write('\n')
+            # Write function alloc_data_structures.
+            fh.write('ds_t ImplVariant::alloc_data_structures(')
+            fh.write('const int n, const int s, ds_t &handle) {\n')
+            fh.write('\tif (handle.ds) {\n')
+            fh.write('\t\tif (handle.type == _stepper._ds)\n')
+            fh.write('\t\t\treturn handle;\n')
+            fh.write('\t\telse\n')
+            fh.write('\t\t\tfree_data_structures(handle);\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\tswitch (_stepper._ds) {\n')
+            for skeleton in skeletons:
+                fh.write('\t\tcase DataStructType::DS_' + skeleton + ': {\n')
+                fh.write('\t\t\thandle.type = DataStructType::DS_{};\n'.format(skeleton))
+                fh.write('\t\t\thandle.ds = DS_{}::allocate_datastructures(n, s);\n'.format(skeleton))
+                fh.write('\t\t\tbreak;\n')
+                fh.write('\t\t}\n')
+            fh.write('\t}\n')
+            fh.write('\treturn handle;\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Write function free_data_structures.
+            fh.write('void ImplVariant::free_data_structures(')
+            fh.write('ds_t &handle) {\n')
+            fh.write('\tif (!handle.ds)\n')
+            fh.write('\t\treturn;\n')
+            fh.write('\n')
+            fh.write('\tswitch (handle.type) {\n')
+            for skeleton in skeletons:
+                fh.write('\t\tcase DataStructType::DS_' + skeleton + ': {\n')
+                fh.write('\t\t\tDS_{0}::free_datastructures(static_cast<DS_{0}_t*>(handle.ds));\n'.format(skeleton))
+                fh.write('\t\t\tbreak;\n')
+                fh.write('\t\t}\n')
+            fh.write('\t}\n')
+            fh.write('\tdelete handle.ds;\n')
+            fh.write('\thandle.ds = nullptr;\n')
+            fh.write('}\n')
+            fh.write('\n')
+
+    write_impl_variant_src()
+
+
+def write_impl_pool(variant_ids: List[int]):
+    def write_impl_pool_header():
+        path = Path('include/impl_pool.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <impl_variant.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <list>\n')
+            fh.write('\n')
+            # Class ImplPool.
+            fh.write('class ImplPool {\n')
+            fh.write('public:\n')
+            fh.write('\tImplPool();\n')
+            fh.write('\n')
+            fh.write('\t~ImplPool();\n')
+            fh.write('\n')
+            fh.write('\tfriend class Driver;\n')
+            fh.write('\n')
+            fh.write('\tbool has_next();\n')
+            fh.write('\n')
+            fh.write('\tconst ImplVariant &next_variant();\n')
+            fh.write('\n')
+            fh.write('private:\n')
+            fh.write('\tstd::list <ImplVariant> _variants;\n')
+            fh.write('\tstd::list<ImplVariant>::iterator _current_variant;\n')
+            fh.write('};\n')
+
+    write_impl_pool_header()
+
+    def write_impl_pool_src(variant_ids: List[int]):
+        db_session: Session = open_db(offsite.config.offsiteConfig.args.db)
+        variants = db_session.query(ImplVariant).filter(ImplVariant.db_id.in_(variant_ids)).all()
+        assert len(variants) > 0
+        close(db_session)
+
+        path = Path('src/impl_pool.cpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#include <impl_pool.hpp>\n')
+            fh.write('\n')
+            fh.write('ImplPool::ImplPool() : _variants() {\n')
+            fh.write('\t_variants.clear();\n')
+            fh.write('\n')
+            constructs = list()
+            pushes = list()
+            for variant in variants:
+                name_variant = ImplVariant.fetch_impl_variant_name(db_session, variant.db_id)
+                name_skeleton = ImplSkeleton.fetch_impl_skeleton_name(db_session, variant.skeleton)
+                if offsite.config.offsiteConfig.args.tile:
+                    constructs.append(
+                        '\tImplVariant {0} ("{0}", {1}, "src/variants/", DataStructType::DS_{2}, 1024);\n'.format(
+                            name_variant, variant.db_id, name_skeleton))
+                else:
+                    constructs.append(
+                        '\tImplVariant {0} ("{0}", {1}, "src/variants/", DataStructType::DS_{2});\n'.format(
+                            name_variant, variant.db_id, name_skeleton))
+                pushes.append('\t_variants.push_back({});\n'.format(name_variant))
+            constructs.sort()
+            pushes.sort()
+            for c, p in zip(constructs, pushes):
+                fh.write(c)
+                fh.write(p)
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('ImplPool::~ImplPool() {}\n')
+            fh.write('\n')
+            fh.write('bool ImplPool::has_next() {\n')
+            fh.write('\tif (_current_variant == _variants.end())\n')
+            fh.write('\t\treturn false;\n')
+            fh.write('\telse\n')
+            fh.write('\t\treturn true;\n')
+            fh.write('}\n')
+            fh.write('\n')
+            fh.write('const ImplVariant &ImplPool::next_variant() {\n')
+            fh.write('\t++_current_variant;\n')
+            fh.write('\treturn (*_current_variant);\n')
+            fh.write('}\n')
+
+    write_impl_pool_src(variant_ids)
+
+
+def write_driver(cflags: str):
+    def write_driver_header():
+        path = Path('include/driver.hpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#pragma once\n')
+            fh.write('\n')
+            fh.write('#include <impl_pool.hpp>\n')
+            fh.write('\n')
+            fh.write('class DataDistribution;\n')
+            fh.write('\n')
+            # Class Driver.
+            fh.write('class Driver {\n')
+            fh.write('public:\n')
+            fh.write('\tDriver();\n')
+            fh.write('\n')
+            fh.write('\tvirtual ~Driver();\n')
+            fh.write('\n')
+            fh.write('\tDriver(const Driver &) = delete;\n')
+            fh.write('\tDriver &operator=(Driver &) = delete;\n')
+            fh.write('\tDriver(Driver &&) = delete;\n')
+            fh.write('\tDriver &operator=(Driver &&) = delete;\n')
+            fh.write('\n')
+            fh.write('\tint run();\n')
+            fh.write('\n')
+            fh.write('private:\n')
+            fh.write('#ifdef WARMUP\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('\tvoid warmup(const DataDistribution &my_dist, double &t, double &h, int &B);\n')
+            else:
+                fh.write('\tvoid warmup(const DataDistribution &my_dist, double &t, double &h);\n')
+            fh.write('#endif\n')
+            fh.write('#ifdef SAMPLING\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('\tvoid sampling(const DataDistribution &my_dist, double &t, double &h, int &B);\n')
+            else:
+                fh.write('\tvoid sampling(const DataDistribution &my_dist, double &t, double &h);\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\tvoid compile_variants();\n')
+            fh.write('\tvoid switch_impl_variant(ImplVariant *impl);\n')
+            fh.write('\n')
+            fh.write('\tImplPool _impl_pool;\n')
+            fh.write('\tImplVariant *_impl;\n')
+            fh.write('\n')
+            fh.write('\tstep_t _step;\n')
+            fh.write('\tds_t _ds_handle;\n')
+            fh.write('\n')
+            fh.write('\tdouble *_y;\n')
+            fh.write('};\n')
+
+    write_driver_header()
+
+    def write_driver_src():
+        path = Path('src/driver.cpp')
+        with path.open('w') as fh:
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+            fh.write('\n')
+            fh.write('// -----------------------------------------------------------------------------\n')
+            fh.write('\n')
+            fh.write('#include <driver.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <global.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <alloc.hpp>\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('#include <config_sampling.hpp>\n')
+            fh.write('#endif\n')
+            fh.write('#include <data_distribution.hpp>\n')
+            fh.write('#include <error.hpp>\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('#include <progress.hpp>\n')
+            fh.write('#endif\n')
+            fh.write('#include <timesnap.hpp>\n')
+            fh.write('\n')
+            fh.write('#include <cstddef>\n')
+            fh.write('#include <iostream>\n')
+            fh.write('#include <omp.h>\n')
+            fh.write('\n')
+            fh.write('#ifdef ONLINE_TUNING\n')
+            fh.write('#include <loop_adapt.h>\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifndef METHOD_HEADER\n')
+            fh.write('#error "ODE method not defined!"\n')
+            fh.write('#else\n')
+            fh.write('#include METHOD_HEADER\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifndef PROBLEM_HEADER\n')
+            fh.write('#error "ODE problem not defined!"\n')
+            fh.write('#else\n')
+            fh.write('#include PROBLEM_HEADER\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('bool sampling_done;\n')
+            fh.write('int sample_counter;\n')
+            fh.write('std::list<ImplVariant>::iterator sample_impl, best_impl;\n')
+            fh.write('double T_best_impl, T_impl;\n')
+            fh.write('time_snap_t ts_step;\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            # Function Driver.
+            fh.write('Driver::Driver()\n')
+            fh.write('\t: _impl_pool(), _impl(nullptr), _step(nullptr), _ds_handle(), _y(alloc1d(n)) {\n')
+            fh.write('\tif (_impl_pool._variants.empty())\n')
+            fh.write('\t\texit_failure("Error: Empty implementation pool!");\n')
+            fh.write('\t// Use the first implementation variant found as default variant.\n')
+            fh.write('\t_impl = &(_impl_pool._variants.front());\n')
+            fh.write('\t// Init data structure handle.\n')
+            fh.write('\t_ds_handle.type = _impl->ds_type();\n')
+            fh.write('\t_impl->alloc_data_structures(n, s, _ds_handle);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Function ~Driver.
+            fh.write('Driver::~Driver() {\n')
+            fh.write('\tif (_impl)\n')
+            fh.write('\t\t_impl->free_data_structures(_ds_handle);\n')
+            fh.write('\tif (_y)\n')
+            fh.write('\t\tfree1d(_y);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Function run.
+            fh.write('int Driver::run() {\n')
+            fh.write('\tdouble h, t;\n')
+            fh.write('\t\n')
+            fh.write('\ttime_snap_t t_solve_ts;\n')
+            fh.write('\tdouble t_run, tps, tpcs;\n')
+            fh.write('\n')
+            fh.write('\t// Variant sampling\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('\tsample_counter = MAX_SAMPLE_RUNS;\n')
+            fh.write('\tsampling_done = false;\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t// Set CPU thread affinity.\n')
+            fh.write('#ifdef _OPENMP\n')
+            fh.write('\tint nthreads;\n')
+            fh.write('#pragma omp parallel num_threads(THREADS)\n')
+            fh.write('\t{\n')
+            fh.write('#pragma omp single\n')
+            fh.write('\t\tnthreads = omp_get_num_threads();\n')
+            fh.write('\t\tif (nthreads != THREADS)\n')
+            fh.write('\t\t\texit_failure("Error: Conflicting number of threads!");\n')
+            fh.write('\t}\n')
+            fh.write('#else\n')
+            fh.write('\t{ // When OpenMP is not used, take care of CPU affinity by ourselves.\n')
+            fh.write('\t\tcpu_set_t mask;\n')
+            fh.write('\t\tCPU_ZERO(&mask);\n')
+            fh.write('\t\tCPU_SET(0, &mask);\n')
+            fh.write('\t\tsched_setaffinity(0, sizeof(cpu_set_t), &mask);\n')
+            fh.write('\t}\n')
+            fh.write('#endif // _OPENMP\n')
+            fh.write('\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\t//Print some information about the configuration used.\n')
+            fh.write(
+                '\tstd::cout << "Available implementation variants: " << _impl_pool._variants.size() << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\tstd::cout << "Sampling order:" << std::endl;\n')
+            fh.write('\tfor (auto impl : _impl_pool._variants)\n')
+            fh.write('\t\tstd::cout << " * " << impl._name << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\tstd::cout << "Method:  " << METHOD_NAME << std::endl;\n')
+            fh.write('\tstd::cout << "Problem: " << PROBLEM_NAME << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('#ifdef _OPENMP\n')
+            fh.write('\tstd::cout << "Mode: Shared-Memory - OpenMP" << std::endl;\n')
+            fh.write('#else\n')
+            fh.write('\tstd::cout << "Mode: Sequential" << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\tstd::cout << "s = " << s << std::endl;\n')
+            fh.write('\tstd::cout << "m = " << m << std::endl;\n')
+            fh.write('\tstd::cout << "n = " << n << std::endl;\n')
+            fh.write('\tstd::cout << "threads = " << THREADS << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('#endif // VERBOSE\n')
+            fh.write('\n')
+            fh.write('\t// Abort if problem size is smaller than the number of threads.\n')
+            fh.write('\tif (THREADS > n)\n')
+            fh.write('\t\texit_failure("More threads than equations!");\n')
+            fh.write('\n')
+            fh.write('\t// Set initial values of ODE.\n')
+            fh.write('\tH = te - t0;\n')
+            fh.write('\n')
+            fh.write('\tinitial_values(t0, _y);\n')
+            fh.write('\n')
+            fh.write('\t// Initialize time measurement.\n')
+            fh.write('\tinit_time_snap()\n')
+            fh.write('\n')
+            fh.write('#ifdef ONLINE_TUNING\n')
+            fh.write('\tsetenv("LA_CONFIG_TXT_INPUT", "LA_CONFIG_DIR", 1);\n')
+            fh.write('\tsetenv("LA_CONFIG_INPUT_TYPE", "0", 1);\n')
+            fh.write('\tsetenv("LA_CONFIG_OUTPUT_TYPE", "1", 1);\n')
+            fh.write('\n')
+            fh.write('\tloop_adapt_debug_level(2);\n')
+            fh.write('\n')
+            fh.write('\tLA_INIT;\n')
+            fh.write('\tLA_REGISTER_INPARALLEL_FUNC(omp_in_parallel);\n')
+            fh.write('\tLA_REGISTER("LOOP", 5);\n')
+            fh.write('\n')
+            fh.write('\tLA_USE_LOOP_PARAMETER("LOOP", "CPU_FREQUENCY");\n')
+            fh.write('\tLA_USE_LOOP_PARAMETER("LOOP", "UNCORE_FREQUENCY");\n')
+            fh.write('\tLA_USE_LOOP_POLICY("LOOP", "MIN_TIME");\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t/// Profiled code region. (START) ///\n')
+            fh.write('\ttime_snap_start(&t_solve_ts);\n')
+            fh.write('\n')
+            fh.write('\t// Precompile all implementation variants that will be sampled later.\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\ttime_snap_t t_compile;\n')
+            fh.write('\ttime_snap_start(&t_compile);\n')
+            fh.write('#endif\n')
+            fh.write('\tcompile_variants();\n')
+            fh.write('\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\tstd::cout << "Compilation time: " << time_snap_stop(&t_compile) / 1e9 << " s " << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#if not defined(SAMPLING) || defined WARMUP\n')
+            fh.write('\t// Link an implementation variant to use it for the warmup steps.\n')
+            fh.write('\tswitch_impl_variant(_impl);\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t/// Solve ODE. (START) ///\n')
+            fh.write('\tsteps = 0;\n')
+            fh.write('\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('\t#pragma omp parallel num_threads(THREADS), shared(sampling_done)\n')
+            fh.write('#else\n')
+            fh.write('\t#pragma omp parallel num_threads(THREADS)\n')
+            fh.write('#endif\n')
+            fh.write('\t{\n')
+            fh.write('\t\tdouble t = t0;\n')
+            fh.write('\t\tdouble h = h0;\n')
+            fh.write('\n')
+            fh.write('\t\t// Distribute data among threads.\n')
+            fh.write('\t\tDataDistribution my_dist(n);\n')
+            fh.write('\n')
+            fh.write('#ifdef ONLINE_TUNING\n')
+            fh.write('\t\tLA_REGISTER_THREAD(omp_get_thread_num());\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifdef WARMUP\n')
+            fh.write('\t\t// Execute some warmup steps before variant sampling.\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('#pragma omp master\n')
+            fh.write(
+                '\t\tstd::cout << "Executing " << WARMUP << " warmup steps using implementation: " << _impl->_name << std::endl << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t\t// Execute warmup steps.\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('\t\twarmup(my_dist, t, h, _impl->_block_size);\n')
+            else:
+                fh.write('\t\twarmup(my_dist, t, h);\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifdef SAMPLING\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\t\ttime_snap_t t_sampling;\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\ttime_snap_start(&t_sampling);\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t\t// Execute variant sampling and return the best implementation variant.\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('\t\tsampling(my_dist, t, h, _impl->_block_size);\n')
+            else:
+                fh.write('\t\tsampling(my_dist, t, h);\n')
+            fh.write('\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\tstd::cout << "Sampling time: " << time_snap_stop(&t_sampling) / 1e9 << " s " << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t\t// Solve remaining ODE with the identified best implementation variant.\n')
+            fh.write('#ifdef ONLINE_TUNING\n')
+            fh.write('\t\tLA_FOR("LOOP", t, t < te, t+=h) {\n')
+            fh.write('#else\n')
+            fh.write('\t\twhile (t < te) {\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#pragma omp single\n')
+            fh.write('\t\t\t++steps;\n')
+            fh.write('\n')
+            fh.write('\t\t\th = std::min(h, te - t);\n')
+            fh.write('\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\t\tshow_progress(t, h, H);\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            # fh.write('#ifndef STEP_CANCELLATION\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write(
+                    '\t\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _impl->_block_size, _y, _ds_handle.ds);\n')
+            else:
+                fh.write('\t\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds);\n')
+            # fh.write('#else\n')
+            # fh.write('\t\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds, T_best_impl);\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifndef ONLINE_TUNING\n')
+            fh.write('\t\t\tt += h;\n')
+            fh.write('#endif\n')
+            fh.write('\t\t}\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\t/// Solve ODE. (END) ///\n')
+            fh.write('\n')
+            fh.write('\tt_run = time_snap_stop(&t_solve_ts) / 1e9;\n')
+            fh.write('\n')
+            fh.write('\t/////// MEASURED CODE REGION (END) ///////\n')
+            fh.write('\n')
+            fh.write('#ifdef ONLINE_TUNING\n')
+            fh.write('\tLA_FINALIZE\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write('\tshow_completion();\n')
+            fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t// Compute some run data: time per step; time per step and component.\n')
+            fh.write('\ttps = t_run / (double) steps;\n')
+            fh.write('\ttpcs = tps / (double) n;\n')
+            fh.write('\n')
+            fh.write('\t// Print some run data.\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\tstd::cout << "steps = " << steps << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\tstd::cout << "time  = " << t_run << std::endl;\n')
+            fh.write('\tstd::cout << "tps   = " << tps << std::endl;\n')
+            fh.write('\tstd::cout << "tpcs  = " << tpcs << std::endl;\n')
+            fh.write('\tstd::cout << std::endl;\n')
+            fh.write('\n')
+            fh.write('\treturn DRIVER_SUCCESS;\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Function compile_variants.
+            fh.write('void Driver::compile_variants() {\n')
+            fh.write('\tconst std::string cflags = "{}";\n'.format(cflags))
+            fh.write('\n')
+            fh.write('\t// Build command string for compiling object file.\n')
+            fh.write('\tstd::string cmd_obj = std::string(COMPILER);\n')
+            fh.write('\tcmd_obj += " -c -fpic " + cflags + " -I.";\n')
+            fh.write(
+                '\tcmd_obj += " -DN=" + std::to_string(N) + " -Dt0=" + std::to_string(t0) + " -Dte=" + std::to_string(te) + " -DH=" + std::to_string(H) + " -Dh0=" + std::to_string(h0) + " -Dthreads=" + std::to_string(THREADS);\n')
+            fh.write(
+                '\tcmd_obj += " -DSTEP_SUCCESS=" + std::to_string(STEP_SUCCESS) + " -DSTEP_FAIL=" + std::to_string(STEP_FAILURE) + " -DSTEP_CANCEL=" + std::to_string(STEP_CANCEL);\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\tcmd_obj += " -DSTEP_CANCELLATION";\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t// Build command string for compiling shared object files.\n')
+            fh.write('\tstd::string cmd_sobj = std::string(COMPILER);\n')
+            fh.write('\tcmd_sobj += " -shared " + cflags + " -I.";\n')
+            fh.write(
+                '\tcmd_sobj += " -DN=" + std::to_string(N) + " -Dn=" + std::to_string(n) + " -Dt0=" + std::to_string(t0) + " -Dte=" + std::to_string(te) + " -DH=" + std::to_string(H) + " -Dh0=" + std::to_string(h0) + " -Dthreads=" + std::to_string(THREADS);\n')
+            fh.write(
+                '\tcmd_sobj += " -DSTEP_SUCCESS=" + std::to_string(STEP_SUCCESS) + " -DSTEP_FAIL=" + std::to_string(STEP_FAILURE) + " -DSTEP_CANCEL=" + std::to_string(STEP_CANCEL);\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\tcmd_sobj += " -DSTEP_CANCELLATION";\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\tfor (auto &impl : _impl_pool._variants)\n')
+            fh.write('\t\timpl.compile(cmd_obj, cmd_sobj);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Function switch_impl_variant.
+            fh.write('void Driver::switch_impl_variant(ImplVariant *impl) {\n')
+            fh.write('\t_impl = impl;\n')
+            fh.write('\t_step = _impl->link();\n')
+            fh.write('\t_ds_handle = impl->alloc_data_structures(n, s, _ds_handle);\n')
+            fh.write('}\n')
+            fh.write('\n')
+            # Function warmup.
+            fh.write('#ifdef WARMUP\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('void Driver::warmup(const DataDistribution &my_dist, double &t, double &h, int &B) {\n')
+            else:
+                fh.write('void Driver::warmup(const DataDistribution &my_dist, double &t, double &h) {\n')
+            fh.write('\tint warmup_counter = WARMUP;\n')
+            fh.write('\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\tT_best_impl = std::numeric_limits<double>::max();\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\twhile (t < te && warmup_counter > 0) {\n')
+            fh.write('\t\t--warmup_counter;\n')
+            fh.write('\n')
+            fh.write('#pragma omp single\n')
+            fh.write('\t\t++ steps;\n')
+            fh.write('\n')
+            fh.write('\t\th = std::min(h, te -t);\n')
+            fh.write('\n')
+            # fh.write('#ifndef STEP_CANCELLATION\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write(
+                    '\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _impl->_block_size, _y, _ds_handle.ds);\n')
+            else:
+                fh.write('\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds);\n')
+            # fh.write('#else\n')
+            # fh.write('\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds, T_best_impl);\n')
+            # fh.write('#endif\n')
+            fh.write('\n')
+            fh.write('\t\tt+=h;\n')
+            fh.write('\t}\n')
+            fh.write('}\n')
+            fh.write('#endif // WARMUP\n')
+            fh.write('\n')
+            # Function sampling.
+            fh.write('#ifdef SAMPLING\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write('void Driver::sampling(const DataDistribution &my_dist, double &t, double &h, int &B) {\n')
+            else:
+                fh.write('void Driver::sampling(const DataDistribution &my_dist, double &t, double &h) {\n')
+            fh.write('\t// Sampling: Init\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t{\n')
+            fh.write('\t\tsample_impl = _impl_pool._variants.begin();\n')
+            fh.write('\t\tT_best_impl = std::numeric_limits<double>::max();\n')
+            fh.write('\t}\n')
+            fh.write('\n')
+            fh.write('\twhile (!sampling_done && t < te) {\n')
+            fh.write('\t\t// Sampling: Switch variant\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\t{\n')
+            fh.write('\t\t\tif (sample_impl != _impl_pool._variants.end() && sample_counter == MAX_SAMPLE_RUNS) {\n')
+            fh.write('\t\t\t\tswitch_impl_variant(&(*sample_impl));\n')
+            fh.write('\t\t\t\tT_impl = std::numeric_limits<double>::max();\n')
+            fh.write('\t\t\t\tsample_counter = 0;\n')
+            fh.write('\t\t\t}\n')
+            fh.write('\t\t}\n')
+            fh.write('\n')
+            fh.write('#pragma omp barrier\n')
+            fh.write('\t\th = std::min(h, te - t);\n')
+            fh.write('\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\ttime_snap_start(&ts_step);\n')
+            fh.write('\n')
+            # fh.write('#ifndef STEP_CANCELLATION\n')
+            if offsite.config.offsiteConfig.args.tile:
+                fh.write(
+                    '\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _impl->_block_size, _y, _ds_handle.ds);\n')
+            else:
+                fh.write('\t\t_step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds);\n')
+            # fh.write('#else\n')
+            # fh.write(
+            #    '\t\tint retVal = _step(my_dist._me, my_dist._first, my_dist._last, t, h, _y, _ds_handle.ds, T_best_impl);\n')
+            # fh.write('#endif // STEP_CANCELLATION\n')
+            fh.write('\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\t\tif (retVal == STEP_SUCCESS) {\n')
+            # fh.write('#endif // STEP_CANCELLATION\n')
+            fh.write('#pragma omp single\n')
+            fh.write('\t\t\t++steps;\n')
+            fh.write('\n')
+            fh.write('\t\t\tt += h;\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\t\t}\n')
+            # fh.write('#ifdef VERBOSE\n')
+            # fh.write('\t\telse {\n')
+            # fh.write('#pragma omp single\n')
+            # fh.write(
+            #    '\t\t\tstd::cout << "Implementation variant " << sample_impl->_name << " cancelled." << std::endl<< std::endl;\n')
+            # fh.write('\t\t}\n')
+            # fh.write('#endif // VERBOSE\n')
+            # fh.write('#endif // STEP_CANCELLATION\n')
+            fh.write('\n')
+            fh.write('#pragma omp barrier\n')
+            fh.write('\n')
+            fh.write('\t\t// Sampling: Evaluate sampling run\n')
+            fh.write('#pragma omp master\n')
+            fh.write('\t\t{\n')
+            fh.write('\t\t\t++sample_counter;\n')
+            fh.write('\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\t\t\tbool cancelled = (retVal == STEP_CANCEL) ? true : false;\n')
+            # fh.write('\t\t\tif (cancelled) {\n')
+            # fh.write('\t\t\t\tsample_counter = MAX_SAMPLE_RUNS;\n')
+            # fh.write('\t\t\t}\n')
+            # fh.write('\t\t\telse {\n')
+            # fh.write('#endif // STEP_CANCELLATION\n')
+            fh.write('\t\t\t\ttime_snap_stop(&ts_step);\n')
+            fh.write('\t\t\t\tdouble T_step = time_snap_stop(&ts_step) / 1e9;\n')
+            fh.write('\n')
+            fh.write('\t\t\t\tT_impl = std::min(T_impl, T_step);\n')
+            fh.write('\n')
+            fh.write('#ifdef SAMPLING_STOP_FACTOR\n')
+            fh.write('\t\t\t\tif (T_impl > SAMPLING_STOP_FACTOR * T_best_impl)\n')
+            fh.write('\t\t\t\t\tsample_counter = MAX_SAMPLE_RUNS;\n')
+            fh.write('#endif // SAMPLING_STOP_FACTOR\n')
+            fh.write('\n')
+            # fh.write('#ifdef STEP_CANCELLATION\n')
+            # fh.write('\t\t\t}\n')
+            # fh.write('#endif // STEP_CANCELLATION\n')
+            # fh.write('\n')
+            fh.write('\t\t\tif (sample_counter == MAX_SAMPLE_RUNS) {\n')
+            fh.write('\t\t\t\tif (T_impl < T_best_impl) {\n')
+            fh.write('\t\t\t\t\tT_best_impl = T_impl;\n')
+            fh.write('\t\t\t\t\tbest_impl = sample_impl;\n')
+            fh.write('#ifdef VERBOSE\n')
+            fh.write(
+                '\t\t\t\t\tstd::cout << "New best implementation variant: " << best_impl->_name << "(" << T_best_impl << " s)" << std::endl;\n')
+            fh.write('\t\t\t\t\tstd::cout << std::endl;\n')
+            fh.write('#endif\n')
+            fh.write('\t\t\t\t}\n')
+            fh.write('\n')
+            fh.write('\t\t\t\t++sample_impl;\n')
+            fh.write(
+                '\t\t\t\tif (sample_impl == _impl_pool._variants.end()) { // No more implementation variants left for sampling!\n')
+            fh.write('\t\t\t\t\tsampling_done = true;\n')
+            fh.write('\t\t\t\t\tswitch_impl_variant(&(*best_impl));\n')
+            fh.write('\t\t\t\t\tstd::cout << "Selected implementation variant: " << best_impl->_name << std::endl;\n')
+            fh.write('\t\t\t\t}\n')
+            fh.write('\t\t\t}\n')
+            fh.write('\t\t}\n')
+            fh.write('#pragma omp barrier\n')
+            fh.write('\t}\n')
+            fh.write('}\n')
+            fh.write('#endif // SAMPLING\n')
+
+    write_driver_src()
+
+
+def write_main():
+    path = Path('src/main.cpp')
+    with path.open('w') as fh:
+        fh.write('// -----------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('// AUTOGENERATED FILE! DO NOT EDIT!\n')
+        fh.write('\n')
+        fh.write('// -----------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('#include <driver.hpp>\n')
+        fh.write('\n')
+        fh.write('#include <iostream>\n')
+        fh.write('\n')
+        # function main.
+        fh.write('int main() {\n')
+        fh.write('\tDriver driver;\n')
+        fh.write('\tint ret = driver.run();\n')
+        fh.write('\tstd::cout << "Finished!" << std::endl;\n')
+        fh.write('\treturn ret;\n')
+        fh.write('}\n')
+
+
+def write_makefile(ivp: IVP, method: ODEMethod, cflags: str, machine: Optional[MachineState] = None):
+    args: Namespace = offsite.config.offsiteConfig.args
+    compiler = machine.compiler.name
+
+    # Write Makefile.
+    path = Path('Makefile')
+    with path.open('w') as fh:
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# AUTOGENERATED FILE! DO NOT EDIT!\n')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# Compiler flags and libraries\n')
+        fh.write('CFLAGS = -Wall -Wextra -Wunknown-pragmas -Wno-unused-function\n')
+        fh.write('CFLAGS += -inline-max-size=100000 -inline-max-total-size=100000\n')
+        fh.write('CFLAGS += -std=c++17\n')
+        fh.write('\n')
+        fh.write('LDLIBS = -lm -ldl\n')
+        if args.online:
+            fh.write('LDLIBS = -lloop_adapt -llikwid\n')
+        fh.write('\n')
+        fh.write('# Configuration compiler\n')
+        fh.write('CC = {}\n'.format(compiler))
+        fh.write('CXX = {}\n'.format('icpc' if compiler == 'icc' else 'g++'))  # TODO more generic way
+        fh.write('CFLAGS += {}\n'.format(cflags))
+        fh.write('\n')
+        fh.write('CFLAGS += -Iinclude\n')
+        if args.online:
+            fh.write('CFLAGS += -I$(LA_INC_DIR)')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# Project settings\n')
+        fh.write('CFLAGS += -DCOMPILER=\\"$(CC)\\"\n')
+        fh.write('\n')
+        if not args.no_openmp:
+            fh.write('CFLAGS += -qopenmp\n')
+            fh.write('\n')
+            fh.write('export KMP_AFFINITY=granularity=fine,compact\n')
+            fh.write('\n')
+        if args.warmup is not None:
+            fh.write('CFLAGS += -DWARMUP={}\n'.format(args.warmup))
+        if args.sampling:
+            fh.write('CFLAGS += -DSAMPLING\n')
+        # if args.cancel:
+        #    fh.write('CFLAGS += -DSTEP_CANCELLATION\n')
+        fh.write('\n')
+        if args.online:
+            fh.write('CFLAGS += -DONLINE_TUNING\n')
+            fh.write('CFLAGS += -DLOOP_ADAPT_ACTIVATE\n')
+            fh.write('CFLAGS += -DLA_CONFIG_DIR=$(LA_CONFIG_DIR) \n')
+            fh.write('\n')
+        if args.verbose:
+            fh.write('CFLAGS += -DVERBOSE\n')
+        fh.write('\n')
+        fh.write('CFLAGS += -DTHREADS={}\n'.format(args.threads))
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# Settings ODE\n')
+        fh.write('CFLAGS += -DN={}\n'.format(args.N))
+        fh.write('CFLAGS += -Dt0={}\n'.format(args.t0))
+        fh.write('CFLAGS += -Dte={}\n'.format(args.te))
+        fh.write('CFLAGS += -Dh0={}\n'.format(args.h0))
+        fh.write('\n')
+        fh.write('CFLAGS += -DMETHOD_HEADER=\<methods/ODE_{}.h\>\n'.format(method))
+        fh.write('CFLAGS += -DPROBLEM_HEADER=\<ivps/RHS_{}.h\>\n'.format(ivp))
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# Binaries to be created\n')
+        fh.write('TARGETS = tuner\n')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('# Source files\n')
+        fh.write('MAIN = src/main.cpp src/driver.cpp src/impl_pool.cpp src/impl_variant.cpp\n')
+        fh.write('COMMON_DEPS = Makefile include/*.hpp\n')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('.PHONY:\tall\n')
+        fh.write('all:	$(TARGETS)\n')
+        fh.write('\n')
+        fh.write('.PHONY:\tclean\n')
+        fh.write('clean:\n')
+        fh.write('\trm -r $(TARGETS) src/ include/\n')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+        fh.write('\n')
+        fh.write('$(TARGETS):\t$(MAIN) $(COMMON_DEPS)\n')
+        fh.write('\t$(CXX) -o $@ $(CFLAGS) $(MAIN) $(LDPATH) $(LDLIBS)\n')
+        fh.write('\n')
+        fh.write('# ------------------------------------------------------------------------------\n')
+
+
+def generate_solver():
+    """Run the offsite_gensolver application.
+
+    Parameters:
+    -----------
+    -
+
+    Returns:
+    --------
+    -
+    """
+    # Query tuning scenario.
+    machine, cflags = fetch_machine_state()
+    ivp, method, skeletons, variants = query_tuning_scenario(machine)
+
+    # Create include and src folders.
+    Path("include").mkdir(parents=True, exist_ok=True)
+    Path("src").mkdir(parents=True, exist_ok=True)
+
+    # Write utility headers.
+    write_utility_headers(machine.db_id)
+    write_datastructs_header(skeletons)
+    # Generate and write impl variant codes.
+    generate_impl_variant_codes(ivp, method, variants)
+    # Write impl files.
+    write_impl_variant(skeletons)
+    write_impl_pool(variants.split(','))
+    # Write driver files.
+    write_driver(cflags)
+    write_main()
+
+    # Write makefile.
+    write_makefile(ivp, method, cflags, machine)
+
+
+def run():
+    """Run the offsite_gensolver application.
+
+    Parameters:
+    -----------
+    -
+
+    Returns:
+    --------
+    -
+    """
+    # Map database classes.
+    mapping()
+    # Parse the program arguments.
+    args: Namespace = parse_program_args_app_gensolver()
+    # Create custom or default configuration.
+    init_config(args)
+    verify_program_args_app_gensolver()
+    # Create YAML input for loop adapt.
+    generate_solver()
+
+
+# For debugging purposes.
+if __name__ == '__main__':
+    run()

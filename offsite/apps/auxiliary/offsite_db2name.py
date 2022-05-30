@@ -1,5 +1,7 @@
 """@package apps.auxiliary.offsite_db2name
 Main script of the offsite_db2name application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace

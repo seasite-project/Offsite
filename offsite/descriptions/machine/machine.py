@@ -1,19 +1,21 @@
 """@package descriptions.machine.machine
-Definition of class MachineState, Compiler, Machine, NetworkConfiguration.
+Definition of class MachineState and Machine.
+
+@author: Johannes Seiferth
 """
 
 from ctypes import sizeof, c_double
 from datetime import datetime
 from getpass import getuser
-from pathlib import Path
 from subprocess import run, CalledProcessError
 
 import attr
 # noinspection PyUnresolvedReferences
 from kerncraft.prefixedunit import PrefixedUnit
+from pathlib2 import Path
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table, UniqueConstraint
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
@@ -121,7 +123,7 @@ class MachineState:
             assert False
         # Attribute incore model.
         incore_model = yaml['in-core model']
-        # .. check if this machine supports the selected incore model tool.
+        # ... check if this machine supports the selected incore model tool.
         if config.pred_incore_tool.value not in incore_model:
             raise RuntimeError(
                 'MachineState \'{}\' does not support incore model \'{}\'!'.format(path, config.pred_incore_tool.value))
@@ -211,8 +213,7 @@ class MachineState:
             Created MachineState object.
         """
         try:
-            machine: MachineState = db_session.query(MachineState).filter(
-                MachineState.db_id.is_(machine_id)).one()
+            machine: MachineState = db_session.query(MachineState).filter(MachineState.db_id.is_(machine_id)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load MachineState object from database!')
         except MultipleResultsFound:
@@ -241,8 +242,7 @@ class MachineState:
             Instance of this object connected to database session.
         """
         # Check if database already contains the machine object.
-        machine: MachineState = db_session.query(MachineState).filter(
-            MachineState.name.like(self.name)).one_or_none()
+        machine: MachineState = db_session.query(MachineState).filter(MachineState.name.like(self.name)).one_or_none()
         if machine:
             # Supplement attributes not saved in database.
             machine.path = self.path
@@ -349,6 +349,7 @@ class Machine:
                      Column('name', String),
                      Column('machine_cfg', Integer, ForeignKey('machine_state.db_id')),
                      Column('network_cfg', Integer, ForeignKey('network_config.db_id')),
+                     Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
                      UniqueConstraint('name', 'machine_cfg', 'network_cfg'), sqlite_autoincrement=True)

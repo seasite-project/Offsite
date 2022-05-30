@@ -1,5 +1,7 @@
 """@package train.node.util.node_communication
 Functions to train the tuning database with communication costs.
+
+@author: Johannes Seiferth
 """
 
 from typing import List, Tuple

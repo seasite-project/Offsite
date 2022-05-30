@@ -1,5 +1,7 @@
 """@package apps.auxiliary.offsite_impl2csv
 Main script of the offsite_impl2csv application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace

@@ -1,5 +1,7 @@
 """@package codegen.generator.kernel_generator
 Definition of class KernelCodeGenerator.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
@@ -127,13 +129,14 @@ class KernelCodeGenerator:
             for loops in self.split_stack.values():
                 for loop in loops:
                     CodeTree.split_loop(loop)
-        # Collect loop data again to include possibly splitted loops.
+        # Collect loop data again to include possibly split loops.
         self.collect_loop_meta_data(code_tree, loop_splits)
         # Optimize tree: unroll
         self.unroll_tree(code_tree)
         # Substitute butcher table coefficients.
-        CodeTree.substitute_butcher_coefficients(
-            code_tree, method.coefficientsA, method.coefficientsB, method.coefficientsC)
+        if method is not None:
+            CodeTree.substitute_butcher_coefficients(
+                code_tree, method.coefficientsA, method.coefficientsB, method.coefficientsC)
         #
         rhs_func: Optional[str]
         if kernel.template.isIVPdependent:

@@ -1,4 +1,3 @@
-ivp_dependent: true
 datastructs:
   - double Y[s][n]
   - double dy[n]
@@ -12,16 +11,12 @@ variants:
         %PRAGMA ivdep
             %LOOP j n
                 %COMP A
-    pmodel :
-      - working sets: { "(s+1)*n+s", "2*n" }
   - name : RHS_Approx_ji
     code: |
         %PRAGMA ivdep
         %LOOP j n
             %LOOP i s unroll 0 assign 0
                 %COMP A
-    pmodel :
-      - working sets: { "(s+1)*n+s" }
 codegen:
   loop splits:
     - i 0

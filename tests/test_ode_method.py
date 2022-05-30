@@ -13,7 +13,7 @@ from offsite.descriptions.ode.ode_method import ODEMethod
 
 class TestODEMethod(TestCase):
     def setUp(self):
-        self.db_session = open_db('test_database.database')
+        self.db_session = open_db('test_database.db')
 
     def tearDown(self):
         rollback(self.db_session)

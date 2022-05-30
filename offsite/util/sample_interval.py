@@ -1,5 +1,7 @@
 """@package util.sample_interval
 Definition of class SampleInterval.
+
+@author: Johannes Seiferth
 """
 
 from enum import Enum
@@ -248,3 +250,36 @@ def create_samples_memory_lvl(
     else:
         raise ValueError('Failed to create sample interval in main memory range!')
     return samples
+
+
+def derive_samples_from_range_expr(intv_range: str, mode: ProgramModeType):
+    if mode == ProgramModeType.MODEL:
+        sample_type = SampleType.MODEL_INNER
+    elif mode == ProgramModeType.RUN:
+        sample_type = SampleType.BENCH_INNER
+    else:
+        assert False
+
+    intervals = list()
+    # Split interval range string.
+    intv_range = intv_range.split(':')
+    assert (len(intv_range) == 3)
+    cur_sample = int(intv_range[0])
+    last_sample = int(intv_range[1])
+    incr = int(intv_range[2])
+    # First interval starts with first sample.
+    e = cur_sample + int(incr / 2)
+    intervals.append(SampleInterval(cur_sample, e, sample_type, cur_sample))
+    # Add inner intervals.
+    cur_sample += incr
+    s = e + 1
+    e += incr
+    while cur_sample < last_sample:
+        intervals.append(SampleInterval(s, e, sample_type, cur_sample))
+        cur_sample += incr
+        s = e + 1
+        e = min(e + incr, last_sample)
+    # Add last interval.
+    if s <= last_sample:
+        intervals.append(SampleInterval(s, last_sample, sample_type, last_sample))
+    return intervals

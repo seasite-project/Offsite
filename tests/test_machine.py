@@ -13,7 +13,7 @@ from offsite.descriptions.machine import MachineState
 
 class TestMachine(TestCase):
     def setUp(self):
-        self.db_session = open_db('test_database.database')
+        self.db_session = open_db('test_database.db')
 
     def tearDown(self):
         rollback(self.db_session)

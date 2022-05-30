@@ -1,10 +1,13 @@
 """@package train.node.util.kerncraft_util
 Utility functions to use the kerncraft tool (https://github.com/RRZE-HPC/kerncraft).
+
+@author: Johannes Seiferth
 """
 
-from pathlib import Path
 from subprocess import run, PIPE, STDOUT, CalledProcessError
 from typing import Dict, List, Optional, Tuple
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite.config import Config

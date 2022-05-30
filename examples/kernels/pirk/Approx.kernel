@@ -1,4 +1,3 @@
-ivp_dependent: false
 datastructs:
   - double b[s]
   - double F[s][n]
@@ -13,16 +12,12 @@ variants:
             %PRAGMA ivdep
             %LOOP j n
                 %COMP A
-    pmodel:
-      - working sets: { "(s+1)*n+s", "2*n" }
   - name: Approx_ji
     code: |
         %PRAGMA ivdep
         %LOOP j n
             %LOOP i s unroll
                 %COMP A
-    pmodel:
-      - working sets: { "(s+1)*n+s" }
 codegen:
   loop splits:
     - i 0

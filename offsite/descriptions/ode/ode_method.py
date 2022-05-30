@@ -1,16 +1,18 @@
 """@package descriptions.ode_method
 Definition of class ODEMethod.
+
+@author: Johannes Seiferth
 """
 
 from datetime import datetime
 from getpass import getuser
-from pathlib import Path
 from typing import List, Tuple, Union
 
 import attr
+from pathlib2 import Path
 from sqlalchemy import Column, DateTime, Integer, String, Table
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
 from offsite.config import __ode_method_ext__

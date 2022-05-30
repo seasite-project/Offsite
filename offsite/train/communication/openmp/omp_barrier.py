@@ -7,14 +7,15 @@ from typing import Any, Dict, List, Tuple
 
 import attr
 from pandas import read_sql_query, DataFrame
+from pathlib2 import Path
+from sqlalchemy.exc import MultipleResultsFound, NoResultFound
 from sqlalchemy.orm import Query, Session
-from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
 
 import offsite.config
-from offsite.config import Config, BenchType
+from offsite.config import Config
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.parser import deserialize_obj, serialize_obj
-from offsite.train.communication.benchmark import Benchmark, BenchmarkRecord
+from offsite.train.communication.benchmark import Benchmark, BenchmarkRecord, BenchmarkType
 from offsite.util.math_utils import remove_outliers
 
 
@@ -37,18 +38,17 @@ class OmpBarrierBenchmark(Benchmark):
         Folder to store source code in.
 
     """
-    type = attr.ib(type=BenchType, default=BenchType.OMP_BARRIER, init=False)
+    type = attr.ib(type=BenchmarkType, default=BenchmarkType.OMP_BARRIER, init=False)
 
-    def run_(self, machine: MachineState, run_config: Dict[str, Any], save_in_db: bool) -> List[
-        BenchmarkRecord]:
+    def run_(self, machine: MachineState, run_config: Dict[str, Any], save_in_db: bool) -> List[BenchmarkRecord]:
         """Run the OmpBarrier benchmark on a given machine.
 
         Parameters:
         -----------
         machine: MachineState
-            MachineState the benchmark is ran on.
+            MachineState the benchmark is run on.
         run_config: dict (key=str, value=Any)
-            Run parameters used to executed this benchmark.
+            Run parameters used to execute this benchmark.
         save_in_db: bool
             If True create valid BenchRecord database entries.
 
@@ -62,7 +62,7 @@ class OmpBarrierBenchmark(Benchmark):
         try:
             repetitions: int = run_config['reps']
         except KeyError:
-            raise RuntimeError('')
+            raise RuntimeError('TODO')
         # Compile benchmark for given machine.
         if self.compiled_for is not machine or not self.binary_exists():
             self.compile(machine)
@@ -96,6 +96,35 @@ class OmpBarrierBenchmark(Benchmark):
             print('\nResetting CPU frequency limits after benchmark \'{}\'.'.format(self.type.value))
         MachineState.reset_cpu_frequency_limits()
         return data
+
+    def _write2file(self, data) -> Path:
+        """Write results of the OmpBarrier benchmark to file.
+
+        Parameters:
+        -----------
+        data:
+            Obtained benchmark results.
+
+        Returns:
+        Path
+            Path of the file created.
+        """
+        bname = self.type.value
+        mname = self.compiled_for.name
+        cname = self.compiled_for.compiler.name
+        cversion = self.compiled_for.compiler.version
+        path = Path('{}_{}_{}{}.bench'.format(bname, mname, cname, cversion))
+        with path.open('w') as fhandle:
+            # Write header.
+            header = 'benchmark: {}\nmachine: {}\ncompiler: {} {}\nflags: {}\nfrequency: {}\n'.format(
+                bname, mname, cname, cversion, self.compiled_for.compiler.flags, self.compiled_for.clock)
+            fhandle.write(header)
+            # Write benchmark data.
+            fhandle.write('data:\n')
+            for rec in data:
+                fhandle.write('- - {}\n'.format(rec.cores))
+                fhandle.write('  - {}\n'.format(rec.data))
+        return path
 
     code = '\
 #include <omp.h>\n\
@@ -210,8 +239,7 @@ int main(int argc, char *argv[])\n\
             # Select and remove all already included data records.
             try:
                 queried_record: OmpBarrierRecord = db_session.query(OmpBarrierRecord).filter(
-                    OmpBarrierRecord.name.like(self.type.value),
-                    OmpBarrierRecord.machine.is_(machine.db_id),
+                    OmpBarrierRecord.name.like(self.type.value), OmpBarrierRecord.machine.is_(machine.db_id),
                     OmpBarrierRecord.compiler.is_(machine.compiler.db_id),
                     OmpBarrierRecord.run_config_serial.is_(serialize_obj(record.run_config))).one()
                 # Update data record.
@@ -250,9 +278,9 @@ int main(int argc, char *argv[])\n\
         data['cores'] = ''
         data['freq'] = ''
         for row in data.itertuples():
-            rcfg = deserialize_obj(row.run_config_serial)
-            data.at[row.Index, 'freq'] = rcfg['freq']
-            data.at[row.Index, 'cores'] = rcfg['cores']
+            row_cfg = deserialize_obj(row.run_config_serial)
+            data.at[row.Index, 'freq'] = row_cfg['freq']
+            data.at[row.Index, 'cores'] = row_cfg['cores']
         data.drop('run_config_serial', axis=1, inplace=True)
         data.sort_values(by=['cores'], inplace=True)
         return data

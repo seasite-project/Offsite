@@ -1,4 +1,3 @@
-ivp_dependent: false
 datastructs:
   - double A[n]
   - double B[n]

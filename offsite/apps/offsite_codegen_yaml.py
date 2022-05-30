@@ -1,23 +1,25 @@
 """@package apps.offsite_codegen_yaml
 Main script of the offsite_codegen_from_yaml application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace
 from os import remove
-from pathlib import Path
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite import __version__
 from offsite.codegen.codegen_util import write_codes_to_file
-from offsite.codegen.generator.impl_generator_c import ImplCodeGenerator
-from offsite.codegen.generator.impl_generator_cpp import ImplCodeGeneratorCPP
-from offsite.codegen.generator.impl_generator_cpp_mpi import ImplCodeGeneratorCppMPI
-from offsite.config import __config_ext__, __tuning_scenario_ext__, init_config, Config, GeneratedCodeLanguageType, \
-    ModelToolType
+from offsite.codegen.generator.impl import make_impl_code_generator, GeneratedCodeLanguageType
+from offsite.codegen.generator.impl.impl_generator import ImplCodeGenerator
+from offsite.config import __config_ext__, __tuning_scenario_ext__, init_config, Config, ModelToolType
 from offsite.database import commit, open_db
 from offsite.database.db_mapping import mapping
 from offsite.descriptions.ode import IVP, ODEMethod
 from offsite.descriptions.parser_util import parse_verify_yaml_desc
+from offsite.solver import SolverType
 from offsite.train.train_utils import deduce_available_impl_variants
 from offsite.tuning_scenario import TuningScenario
 
@@ -70,27 +72,9 @@ def parse_program_args_app_codegen() -> Namespace:
     return parser.parse_args()
 
 
-def run_code_generation():
-    """Run the code generation application for use-case data from YAML.
-
-    Parameters:
-    -----------
-    -
-
-    Returns:
-    -
-    """
+def run_codegen_ode(db_session, ivps, methods, skeletons):
     config: Config = offsite.config.offsiteConfig
-    config.pred_model_tool = ModelToolType.KERNCRAFT  # Currently only codegen for KERNCRAFT is supported
-    # Connect to database.
-    if config.args.db is None:
-        db_session = open_db('tmp_db_codegen_yaml_config.db')
-    else:
-        db_session = open_db(config.args.db)
-    # Read tuning scenario.
-    scenario: TuningScenario = TuningScenario.from_file(config.args.scenario)
-    # Parse YAML files and store in database.
-    machine, skeletons, templates, methods, ivps = parse_verify_yaml_desc(db_session, scenario)
+    config.pred_model_tool = ModelToolType.KERNCRAFT  # Currently, only codegen for KERNCRAFT is supported.
     # Select ODE method if tuning scenario contains multiple ODE methods.
     if len(methods) == 1:
         method: ODEMethod = methods[0]
@@ -101,8 +85,8 @@ def run_code_generation():
             select_str += ' *  ({})  {}\n'.format(method.db_id, method.name)
             method_ids.append(method.db_id)
         # Select the used ODE method.
-        method_id = -1
-        while method_id not in method_ids:
+        ipt_id = -1
+        while ipt_id not in method_ids:
             ipt = input(select_str)
             try:
                 ipt_id = int(ipt)
@@ -132,33 +116,75 @@ def run_code_generation():
                 print('Invalid input! Not a valid number!')
         ivp: IVP = next(x for x in ivps if x.db_id == ipt_id)
     # Folders used to store generated code files.
-    folder_ds = config.args.folder_ds if config.args.folder_ds is not None else config.args.folder
-    folder_impl = config.args.folder_impl if config.args.folder_impl is not None else config.args.folder
-    folder_ivp = config.args.folder_ivp if config.args.folder_ivp is not None else config.args.folder
-    folder_method = config.args.folder_method if config.args.folder_method is not None else config.args.folder
+    folder = config.args.folder
+    folder_ds = config.args.folder_ds if config.args.folder_ds is not None else folder
+    folder_impl = config.args.folder_impl if config.args.folder_impl is not None else folder
+    folder_ivp = config.args.folder_ivp if config.args.folder_ivp is not None else folder
+    folder_method = config.args.folder_method if config.args.folder_method is not None else folder
     # Derive all available impl variants ...
+    codegen: ImplCodeGenerator = make_impl_code_generator(
+        config.args.mode, db_session, folder_impl, folder_ivp, folder_method, folder_ds)
     for skeleton in skeletons:
         available_variants, _ = deduce_available_impl_variants(db_session, skeleton, False)
         available_variants = [impl.to_database(db_session) for impl in available_variants]
         commit(db_session)
         # ... and generate impl variant codes.
         impl_variants = [(impl.db_id, impl.kernels) for impl in available_variants]
-        if config.args.mode == GeneratedCodeLanguageType.C:
-            codes = ImplCodeGenerator(db_session, folder_impl, folder_ivp, folder_method).generate(
-                skeleton, impl_variants, ivp, method)
-            write_codes_to_file(codes, suffix='')
-        elif config.args.mode == GeneratedCodeLanguageType.CPP:
-            codes = ImplCodeGeneratorCPP(db_session, folder_ds, folder_impl, folder_ivp, folder_method).generate(
-                skeleton, impl_variants, ivp, method)
-            write_codes_to_file(codes, suffix='')
-        elif config.args.mode == GeneratedCodeLanguageType.CPP_MPI:
-            codes = ImplCodeGeneratorCppMPI(db_session, folder_ds, folder_impl, folder_ivp, folder_method).generate(
-                skeleton, impl_variants, ivp, method)
-            write_codes_to_file(codes, suffix='')
-        else:
-            assert False
+        codes = codegen.generate(skeleton, impl_variants, ivp, method)
+        write_codes_to_file(codes, suffix='')
     if config.args.db is None:
         remove('tmp_db_codegen_yaml_config.db')
+
+
+def run_codegen_generic(db_session, skeletons):
+    config: Config = offsite.config.offsiteConfig
+    config.pred_model_tool = ModelToolType.KERNCRAFT  # Currently, only codegen for KERNCRAFT is supported.
+    # Folders used to store generated code files.
+    folder = config.args.folder
+    folder_ds = config.args.folder_ds if config.args.folder_ds is not None else folder
+    folder_impl = config.args.folder_impl if config.args.folder_impl is not None else folder
+    # Derive all available impl variants ...
+    codegen: ImplCodeGenerator = make_impl_code_generator(
+        config.args.mode, db_session, folder_impl, folder, folder, folder_ds)
+    for skeleton in skeletons:
+        available_variants, _ = deduce_available_impl_variants(db_session, skeleton, False)
+        available_variants = [impl.to_database(db_session) for impl in available_variants]
+        commit(db_session)
+        # ... and generate impl variant codes.
+        impl_variants = [(impl.db_id, impl.kernels) for impl in available_variants]
+        codes = codegen.generate(skeleton, impl_variants)
+        write_codes_to_file(codes, suffix='')
+    if config.args.db is None:
+        remove('tmp_db_codegen_yaml_config.db')
+
+
+def run_code_generation():
+    """Run the code generation application for use-case data from YAML.
+
+    Parameters:
+    -----------
+    -
+
+    Returns:
+    -
+    """
+    config: Config = offsite.config.offsiteConfig
+    config.pred_model_tool = ModelToolType.KERNCRAFT  # Currently, only codegen for KERNCRAFT is supported.
+    # Connect to database.
+    if config.args.db is None:
+        db_session = open_db('tmp_db_codegen_yaml_config.db')
+    else:
+        db_session = open_db(config.args.db)
+    # Read tuning scenario.
+    scenario: TuningScenario = TuningScenario.from_file(config.args.scenario)
+    # Parse YAML files and store in database.
+    machine, skeletons, templates, methods, ivps = parse_verify_yaml_desc(db_session, scenario)
+    if scenario.solver.type == SolverType.ODE:
+        run_codegen_ode(db_session, ivps, methods, skeletons)
+    elif scenario.solver.type == SolverType.GENERIC:
+        run_codegen_generic(db_session, skeletons)
+    else:
+        assert False
 
 
 def run():

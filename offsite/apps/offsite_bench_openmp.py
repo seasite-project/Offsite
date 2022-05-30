@@ -1,14 +1,18 @@
 """@package apps.offsite_bench_openmp
 Main script of the offsite_bench_openmp application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace
-from pathlib import Path
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite import __version__
-from offsite.config import BenchType, __config_ext__, init_config, Config
+from offsite.config import __config_ext__, init_config, Config
 from offsite.descriptions.machine import MachineState
+from offsite.train.communication.benchmark import BenchmarkType
 from offsite.train.communication.openmp.omp_barrier import OmpBarrierBenchmark
 
 
@@ -31,7 +35,7 @@ def parse_program_args_app_bench_openmp() -> Namespace:
     parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__version__),
                         help='Print program version and exit.')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print further information on this run.')
-    parser.add_argument('--benchmark', action='store', required=True, type=BenchType,
+    parser.add_argument('--benchmark', action='store', required=True, type=BenchmarkType,
                         help='Name of the benchmark executed.\nAvailable benchmarks:\n * omp_barrier')
     parser.add_argument('--machine', action='store', required=True, type=Path,
                         help='Path to YAML machine state description (.yaml) file.')
@@ -41,41 +45,6 @@ def parse_program_args_app_bench_openmp() -> Namespace:
                             __config_ext__))
     # Parse program arguments.
     return parser.parse_args()
-
-
-def write_benchmark_file(bench: BenchType, data, machine: MachineState):
-    """Write benchmark results to file.
-
-    Parameters:
-    -----------
-    bench: BenchType
-        Executed benchmark.
-    data:
-        Obtained benchmark results.
-    machine: MachineState
-        MachineState used to run the benchmark.
-
-    Returns:
-    -
-    """
-    bname = bench.value
-    mname = machine.name
-    cname = machine.compiler.name
-    cversion = machine.compiler.version
-    cflags = machine.compiler.flags
-    path = Path('{}_{}_{}{}.bench'.format(bname, mname, cname, cversion))
-    with path.open('w') as fhandle:
-        # Write header.
-        fhandle.write('benchmark: {}\n'.format(bname))
-        fhandle.write('machine: {}\n'.format(mname))
-        fhandle.write('compiler: {} {}\n'.format(cname, cversion))
-        fhandle.write('flags: {}\n'.format(cflags))
-        fhandle.write('frequency: {}\n'.format(machine.clock))
-        # Write benchmark data.
-        fhandle.write('data:\n')
-        for rec in data:
-            fhandle.write('- - {}\n'.format(rec.cores))
-            fhandle.write('  - {}\n'.format(rec.data))
 
 
 def run_benchmark():
@@ -92,12 +61,10 @@ def run_benchmark():
     # Parse passed machine state file.
     machine = MachineState.from_yaml(config.args.machine, config.args.compiler)
     # Run benchmark.
-    if config.args.benchmark == BenchType.OMP_BARRIER:
-        # Run benchmark.
+    if config.args.benchmark == BenchmarkType.OMP_BARRIER:
+        # Run benchmark and write results to file.
         params = {'reps': config.repetitions_communication_operations}
-        data = OmpBarrierBenchmark().run(machine, params, False)
-        # Write benchmark data to file.
-        write_benchmark_file(config.args.benchmark, data, machine)
+        OmpBarrierBenchmark().run(machine, params, save_in_db=False, write_to_file=True)
     else:
         raise RuntimeWarning('Unknown benchmark {}!'.format(config.args.benchmark))
 

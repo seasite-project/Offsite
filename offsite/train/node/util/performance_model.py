@@ -1,5 +1,7 @@
 """@package train.node.util.performance_model
 Performance modeling functions.
+
+@author: Johannes Seiferth
 """
 
 from typing import Dict, List

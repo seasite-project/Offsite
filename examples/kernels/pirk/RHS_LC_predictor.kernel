@@ -1,4 +1,3 @@
-ivp_dependent: true
 datastructs:
   - double Ycur[s][n]
   - double tmp[s]
@@ -7,15 +6,17 @@ datastructs:
   - double Fs[s]
   - double Fn[n]
   - double y[n]
+  - double tmp_s
 computations:
   A: "f = %RHS"
   B: "Ycur[l][j] += A[l][i] * f"
   B1: "tmp[l] += A[l][i] * f"
   C: "Ycur[l][j] = Ycur[l][j] * h + y[j]"
   C1: "Ycur[l][j] = tmp[l] * h + y[j]"
+  C2: "Ycur[l][j] = tmp_s * h + y[j]"
   D: "Fs[i] = %RHS"
   E: "Fn[j] = %RHS"
-  F: "Ycur[l][j] += A[l][i] * Fs[l]"
+  F: "tmp_s += A[l][i] * Fs[l]"
   G: "Ycur[l][j] += A[l][i] * Fn[j]"
 variants:
   - name : RHS_LC_predictor_jil
@@ -28,8 +29,6 @@ variants:
                     %COMP B1
             %LOOP l s unroll 2
                 %COMP C1
-    pmodel :
-      - working sets: { "s*n+n+s*s", "2*s*n+n+s*s" }
     codegen :
         RHS: "eval_component"
   - name : RHS_LC_predictor_jli
@@ -41,9 +40,7 @@ variants:
             %LOOP l s unroll 2
                 %LOOP i s unroll 1 assign 0
                     %COMP F
-                %COMP C
-    pmodel :
-      - working sets: { "s*n+n+s*s+s", "2*s*n+n+s*s+s" }
+                %COMP C2
   - name : RHS_LC_predictor_ijl
     code: |
         %PRAGMA nounroll_and_jam
@@ -58,11 +55,6 @@ variants:
         %LOOP j n
             %LOOP l s unroll 1
                 %COMP C
-    pmodel :
-      - name : 1
-        working sets: { "2*s*n+s*s", "s*n+n+s*s", "s*n+n+s" }
-      - name : 2
-        working sets: { "s*n+n" }
   - name : RHS_LC_predictor_ilj
     code: |
         %PRAGMA nounroll_and_jam
@@ -81,13 +73,6 @@ variants:
             %PRAGMA ivdep
             %LOOP j n
                 %COMP C
-    pmodel :
-      - name : 1
-        working sets: { "s*n+n", "2*n" }
-      - name : 2
-        working sets: { "s*n+n+s*s", "s*n+n+s", "2*n" }
-      - name : 3
-        working sets: { "s*n+n", "2*n" }
     codegen :
         RHS: "eval_range"
 codegen:

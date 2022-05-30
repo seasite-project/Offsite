@@ -1,17 +1,17 @@
 """@package train.node.train_kernel
 Functions to train the tuning database with kernel predictions.
+
+@author: Johannes Seiferth
 """
 
-from datetime import timedelta
 from multiprocessing import cpu_count, Pool
 from os import putenv
-from pathlib import Path
 from statistics import mean
 from subprocess import run, CalledProcessError, PIPE
-from time import time
 from traceback import print_exc
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
+from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
@@ -29,6 +29,7 @@ from offsite.train.node.util.yasksite_utils import execute_yasksite_bench_mode, 
 from offsite.train.train_utils import fuse_equal_records
 from offsite.util.math_utils import remove_outliers
 from offsite.util.sample_interval import SampleInterval, SampleType
+from offsite.util.time import start_timer, stop_timer
 
 IntervalRecordList = List[Tuple[SampleInterval, str]]
 PModelPredictionDict = Dict[int, List[str]]
@@ -57,9 +58,10 @@ def train_kernel(db_session: Session, machine: MachineState, templates: List[Ker
         List of kernels for which we obtained new predictions in this run.
     """
     config: Config = offsite.config.offsiteConfig
+    ts = -1
     if config.args.verbose:
         print('  * Kernel predictions...', end='', flush=True)
-        start_time_kernel = time()
+        ts = start_timer()
     predicted_kernels: List[Kernel] = list()
     if config.args.mode == ProgramModeType.MODEL:
         if config.scenario.solver.type == SolverType.ODE:
@@ -74,13 +76,12 @@ def train_kernel(db_session: Session, machine: MachineState, templates: List[Ker
     # Commit to database.
     commit(db_session)
     if config.args.verbose:
-        stop_time_kernel = time()
-        print(' done: Duration {}.'.format(timedelta(seconds=round(stop_time_kernel - start_time_kernel, 0))))
+        print(' done: Duration {}.'.format(stop_timer(ts)))
     return predicted_kernels
 
 
 def train_kernel_predictions_ode(db_session: Session, machine: MachineState, templates: List[KernelTemplate],
-                                 methods: List[ODEMethod], ivps: List[IVP]) -> List[Kernel]:
+                                 methods: List[ODEMethod], ivps: List[IVP]) -> Set[Kernel]:
     """Train database with kernel runtime predictions.
 
     Compute the kernel runtime predictions for all configuration of kernels, IVP, ODE method and machine state.
@@ -100,8 +101,8 @@ def train_kernel_predictions_ode(db_session: Session, machine: MachineState, tem
 
     Returns:
     --------
-    predicted_kernels: List of Kernel
-        List of kernels for which we obtained new predictions in this run.
+    predicted_kernels: Set of Kernel
+        Set of kernels for which we obtained new predictions in this run.
     """
     config: Config = offsite.config.offsiteConfig
     data_kc = list()
@@ -242,7 +243,7 @@ def train_kernel_predictions_ode(db_session: Session, machine: MachineState, tem
 
 
 def train_kernel_predictions_generic(
-        db_session: Session, machine: MachineState, templates: List[KernelTemplate]) -> List[Kernel]:
+        db_session: Session, machine: MachineState, templates: List[KernelTemplate]) -> Set[Kernel]:
     """Train database with kernel runtime predictions.
 
     Compute the kernel runtime predictions for all configuration of kernels and machine state.
@@ -258,8 +259,8 @@ def train_kernel_predictions_generic(
 
     Returns:
     --------
-    predicted_kernels: List of Kernel
-        List of kernels for which new predictions were obtained in this run.
+    predicted_kernels: Set of Kernel
+        Set of kernels for which new predictions were obtained in this run.
     """
     config: Config = offsite.config.offsiteConfig
     data_kc = list()
@@ -648,7 +649,7 @@ def bench_kernel_runtime(
         pmodel_runtimes = dict()
         # Benchmark pmodel kernels.
         for pmodel in kernel.pmodel_kernels:
-            pmodel_runtimes = train_pmodel_runtime(pmodel, machine, method, ivp, interval, pmodel_runtimes)
+            pmodel_runtimes = train_pmodel_runtime(pmodel, machine, interval, pmodel_runtimes, method, ivp)
             # Compute the kernel runtime prediction of this variant by combining its benchmarked pmodel kernel
             # predictions.
             for cores, predictions in pmodel_runtimes.items():

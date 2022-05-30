@@ -1,15 +1,17 @@
 """@package descriptions.parser
 Functions to parse YAML descriptions as well as different utility functions and classes used during YAML parsing.
+
+@author: Johannes Seiferth
 """
 
 from codecs import decode, encode
 from enum import IntEnum
-from pathlib import Path
 from pickle import dumps, loads
 from re import findall, split as re_split, S
 from typing import Any, Dict, List, Tuple
 
 import attr
+from pathlib2 import Path
 from ruamel import yaml
 
 

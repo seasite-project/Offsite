@@ -29,7 +29,8 @@ def run():
             # 'test_train_communication',
             # 'test_utils_kerncraft',
             # 'test_benchmark',
-            # 'test_pmodel_generator',
+            # Code generator.
+            'test_pmodel_generator',
 
             # 'test_train_impl',  # TODO
             # 'test_train_kernel', # TODO

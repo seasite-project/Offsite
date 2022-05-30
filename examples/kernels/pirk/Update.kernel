@@ -1,4 +1,3 @@
-ivp_dependent: false
 datastructs:
   - double h
   - double y[n]
@@ -12,6 +11,4 @@ variants:
         %PRAGMA ivdep
         %LOOP j n
             %COMP A
-    pmodel :
-      - working sets: { "2*n" }
 model_tool: kerncraft

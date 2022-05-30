@@ -1,5 +1,7 @@
 """@package descriptions.machine.compiler
 Definition of class Compiler.
+
+@author: Johannes Seiferth
 """
 
 from datetime import datetime
@@ -9,8 +11,8 @@ from typing import Dict
 
 import attr
 from sqlalchemy import Column, DateTime, Integer, String, Table, UniqueConstraint
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
 from offsite.database import METADATA, insert

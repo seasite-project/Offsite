@@ -1,4 +1,3 @@
-ivp_dependent: true
 datastructs:
   - double y[n]
   - double Y[s][n]
@@ -16,8 +15,6 @@ variants:
             %LOOP i s unroll 0 assign 0
                 %COMP A
             %COMP B
-    pmodel :
-      - working sets: { "(s+1)*n+s" }
   - name : RHS_Approx_Update_ij
     code: |
         %PRAGMA nounroll_and_jam
@@ -25,10 +22,10 @@ variants:
             %PRAGMA ivdep
             %LOOP j n
                 %COMP C
-    pmodel :
-      - working sets: { "(s+1)*n+s", "2*n" }
 codegen:
   RHS: "eval_component"
   RHS_input: "Y[i]"
   RHS_butcher_nodes: "c[i]"
+  loop splits:
+    - i 0
 model_tool: kerncraft

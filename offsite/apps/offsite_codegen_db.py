@@ -1,17 +1,19 @@
 """@package apps.offsite_codegen_db
 Main script of the offsite_codegen application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace
-from pathlib import Path
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite import __version__
 from offsite.codegen.codegen_util import write_codes_to_file
-from offsite.codegen.generator.impl_generator_c import ImplCodeGenerator
-from offsite.codegen.generator.impl_generator_cpp import ImplCodeGeneratorCPP
-from offsite.codegen.generator.impl_generator_cpp_mpi import ImplCodeGeneratorCppMPI
-from offsite.config import __config_ext__, init_config, Config, GeneratedCodeLanguageType, ModelToolType
+from offsite.codegen.generator.impl import make_impl_code_generator, GeneratedCodeLanguageType
+from offsite.codegen.generator.impl.impl_generator import ImplCodeGenerator
+from offsite.config import __config_ext__, init_config, Config, ModelToolType
 from offsite.database import commit, open_db
 from offsite.database.db_mapping import mapping
 from offsite.descriptions.impl.impl_skeleton import ImplSkeleton
@@ -192,21 +194,11 @@ def run_code_generation():
     folder_ivp = config.args.folder_ivp if config.args.folder_ivp is not None else config.args.folder
     folder_method = config.args.folder_method if config.args.folder_method is not None else config.args.folder
     # Generate impl variant codes.
+    codegen: ImplCodeGenerator = make_impl_code_generator(
+        config.args.mode, db_session, folder_impl, folder_ivp, folder_method, folder_ds)
     for skeleton in skeletons.values():
-        if config.args.mode == GeneratedCodeLanguageType.C:
-            codes = ImplCodeGenerator(db_session, folder_impl, folder_ivp, folder_method).generate(
-                skeleton[0], skeleton[1], ivp, method)
-            write_codes_to_file(codes, suffix='')
-        elif config.args.mode == GeneratedCodeLanguageType.CPP:
-            codes = ImplCodeGeneratorCPP(db_session, folder_ds, folder_impl, folder_ivp, folder_method).generate(
-                skeleton[0], skeleton[1], ivp, method)
-            write_codes_to_file(codes, suffix='')
-        elif config.args.mode == GeneratedCodeLanguageType.CPP_MPI:
-            codes = ImplCodeGeneratorCppMPI(db_session, folder_ds, folder_impl, folder_ivp, folder_method).generate(
-                skeleton[0], skeleton[1], ivp, method)
-            write_codes_to_file(codes, suffix='')
-        else:
-            assert False
+        codes = codegen.generate(skeleton[0], skeleton[1], ivp, method)
+        write_codes_to_file(codes, suffix='')
 
 
 def run():

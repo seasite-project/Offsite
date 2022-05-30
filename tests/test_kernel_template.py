@@ -19,7 +19,7 @@ class TestKernelTemplate(TestCase):
     def setUp(self):
         args = None
         self.config = Config(args)
-        self.db_session = open_db('test_kernel_template.database')
+        self.db_session = open_db('test_kernel_template.db')
         self.ivp = IVP.from_yaml(Path('examples/ivps/Heat2D.ivp'))
         self.kernel_template_lc = KernelTemplate.from_yaml(Path('examples/kernels/pirk/LC.kernel'))
         self.kernel_template_rhs = KernelTemplate.from_yaml(Path('examples/kernels/pirk/RHS.kernel'))
@@ -27,16 +27,16 @@ class TestKernelTemplate(TestCase):
 
     def tearDown(self):
         close(self.db_session)
-        remove('test_kernel_template.database')
+        remove('test_kernel_template.db')
 
     def test_types(self):
         # Test function generate_pmodel_code.
         for kernel in self.kernel_template_lc.variants:
-            kernel.generate_pmodel_code(self.method, self.ivp)
+            kernel.generate_pmodel_code(self.method)
         for kernel in self.kernel_template_rhs.variants:
             kernel.generate_pmodel_code(self.method, self.ivp)
         # Test function to_database.
         self.kernel_template_lc.to_database(self.db_session)
-        self.kernel_template_lc.to_database(self.db_session)
+        self.kernel_template_rhs.to_database(self.db_session)
         # Test function from_database.
         KernelTemplate.from_database(self.db_session, 'LC')

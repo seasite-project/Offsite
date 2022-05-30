@@ -1,5 +1,7 @@
 """@package descriptions.parser_util
 Functions to parse YAML description as well as different utility functions and classes used during YAML parsing.
+
+@author: Johannes Seiferth
 """
 
 from typing import Dict, List, Optional
@@ -85,7 +87,7 @@ def parse_verify_yaml_desc(db_session: Session, scenario: TuningScenario):
                         templates.remove(template)
         templates = tmp_list
     # Parse the ODE method descriptions if required by solver.
-    methods = None
+    methods: List[ODEMethod] = list()
     if SolverSpecificTableType.ODE_METHOD in scenario.solver.specific_tables:
         methods_dict: Dict[str, ODEMethod] = dict()
         if scenario.method_path is not None:
@@ -96,11 +98,11 @@ def parse_verify_yaml_desc(db_session: Session, scenario: TuningScenario):
             for d in scenario.method_dir:
                 for m in parse_methods(d):
                     methods_dict[m.name] = m
-        methods: List[ODEMethod] = [method.to_database(db_session) for method in methods_dict.values()]
+        methods = [method.to_database(db_session) for method in methods_dict.values()]
         if not methods:
             raise RuntimeError('No valid ODE methods found.')
     # Parse the IVP descriptions if required by solver.
-    ivps = None
+    ivps: List[IVP] = list()
     if SolverSpecificTableType.IVP in scenario.solver.specific_tables:
         ivps_dict: Dict[str, IVP] = dict()
         if scenario.ivp_path is not None:
@@ -112,7 +114,7 @@ def parse_verify_yaml_desc(db_session: Session, scenario: TuningScenario):
                 for i in parse_ivps(d, config.pred_model_tool):
                     if i.name not in methods:
                         ivps_dict[i.name] = i
-        ivps: List[IVP] = [ivp.to_database(db_session) for ivp in ivps_dict.values()]
+        ivps = [ivp.to_database(db_session) for ivp in ivps_dict.values()]
         if not ivps:
             raise RuntimeError('No valid IVPs found.')
     # Return parsed objects.

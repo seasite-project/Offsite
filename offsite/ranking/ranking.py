@@ -1,5 +1,7 @@
 """@package ranking.ranking
 Definition of class RankingRecord and of different ranking functions.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
@@ -180,8 +182,8 @@ class RankingRecord:
             RankingRecord.machine.is_(machine), RankingRecord.compiler.is_(compiler), RankingRecord.method.is_(method),
             RankingRecord.ivp.is_(ivp), RankingRecord.frequency.is_(frequency), RankingRecord.cores.in_(core_counts),
             RankingRecord.first.is_(first), RankingRecord.last.is_(last), RankingRecord.rankCriteria.is_(rank_criteria),
-            RankingRecord.cutoffCriteria.is_(cutoff_criteria),
-            RankingRecord.cutoffValue.is_(cutoff_value)).delete(synchronize_session=False)
+            RankingRecord.cutoffCriteria.is_(cutoff_criteria), RankingRecord.cutoffValue.is_(cutoff_value)).delete(
+            synchronize_session=False)
 
     @staticmethod
     def remove_records(db_session: Session, machine: int, compiler: int, method: int, ivp: int, frequency: float,

@@ -1,5 +1,7 @@
 """@package database.db_mapping
 Handles mapping of database tables and classes.
+
+@author: Johannes Seiferth
 """
 
 from sqlalchemy.orm import mapper

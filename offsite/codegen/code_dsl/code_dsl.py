@@ -1,5 +1,7 @@
 """@package codegen.code_dsl.code_dsl
 Definition of the code_dsl DSL used to described ImplSkeleton and KernelTemplate codes.
+
+@author: Johannes Seiferth
 """
 
 from lark import Lark, Tree

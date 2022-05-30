@@ -3,13 +3,20 @@ path = examples/machines/node17.yml
 compiler = icc
 
 [SOLVER]
-type = SOLVER
+name = PIRK
+type = ODE
 
 [IMPLEMENTATION SKELETON]
-path = examples/impls/vec_add/A.impl
+dir = examples/impls/pirk/openmp/
 
 [KERNEL TEMPLATE]
-path = examples/kernels/vec_add/VecAdd.kernel
+dir = examples/kernels/pirk
+
+[IVP]
+path = examples/ivps/InverterChain.ivp
+
+[ODE METHOD]
+path = examples/methods/implicit/radauIIA7.ode
 
 [BENCHMARK]
 omp_barrier = examples/bench/OMP_BARRIER_node17_icc2021.4.0.bench

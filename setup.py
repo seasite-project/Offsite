@@ -55,7 +55,6 @@ setup(
         'License :: OSI Approved :: GNU Affero General Public License v3',
 
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
@@ -73,14 +72,14 @@ setup(
         'numpy>=1.21.4',
         'osaca>=0.4.7',
         'pandas>=1.3.4',
-        'pathlib>=1.0.1',
-        'pycparser==2.20',
+        'pathlib2>=2.3.7',
+        'pycparser==2.21',
         'ruamel.yaml>=0.17.17',
         'sqlalchemy>=1.4.27',
         'sortedcontainers>=2.4.0',
         'sympy>=1.9',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7,<3.10',
 
     entry_points={
         'console_scripts': [

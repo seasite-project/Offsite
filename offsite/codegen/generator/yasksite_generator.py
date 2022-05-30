@@ -1,5 +1,7 @@
 """@package codegen.generator.yasksite_generator
 Definition of class YasksiteCodeGenerator.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy

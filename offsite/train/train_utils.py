@@ -1,5 +1,7 @@
 """@package train.train_utils
-Utility functions used for training the tuning database.
+Util functions used for training the tuning database.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
@@ -175,7 +177,7 @@ def deduce_available_impl_variants(db_session: Session, skeleton: ImplSkeleton, 
             # At least one kernel of each kernel template is required to derive valid implementation variants.
             if len(changed[1]) > 0:
                 kernel_ids[changed[0]] = changed[1]
-    # Deduce all availabe implementation variant permutations from the given kernel ids.
+    # Deduce all available implementation variant permutations from the given kernel ids.
     variants = product(*kernel_ids.values())
     # Filter out all implementation variants whose kernels do not use the same optimization parameters.
     if filter_yasksite_opt:

@@ -1,0 +1,22 @@
+[MACHINE]
+path = examples/machines/node17.yml
+compiler = icc
+
+[SOLVER]
+name = PIRK
+type = ODE
+
+[IMPLEMENTATION SKELETON]
+dir = examples/impls/pirk/openmp_min/
+
+[KERNEL TEMPLATE]
+dir = examples/kernels/pirk_min
+
+[IVP]
+path = examples/ivps/InverterChain.ivp
+
+[ODE METHOD]
+path = examples/methods/implicit/radauIIA7.ode
+
+[BENCHMARK]
+omp_barrier = examples/bench/OMP_BARRIER_node17_icc2021.4.0.bench

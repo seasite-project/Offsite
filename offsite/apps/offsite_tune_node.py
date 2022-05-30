@@ -1,13 +1,13 @@
 """@package apps.offsite_tune_node
 Main script of the offsite_tune_node autotuning application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import ArgumentParser, Namespace
-from datetime import timedelta
-from pathlib import Path
-from time import time
 from typing import List
 
+from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
@@ -19,11 +19,12 @@ from offsite.database.db_mapping import mapping
 from offsite.descriptions.impl.kernel_template import Kernel
 from offsite.descriptions.parser_util import parse_verify_yaml_desc, print_yaml_desc
 from offsite.train.communication.train_communication import train_node_communication
-from offsite.train.node.train_impl import train_impl_variant
+from offsite.train.node.train_impl import train_impl_variant_predictions
 from offsite.train.node.train_kernel import train_kernel
 from offsite.train.node.train_kernel_blocksize import train_kernel_blocksizes
 from offsite.tuning_scenario import TuningScenario
-from offsite.util.sample_interval import SampleInterval, SampleType
+from offsite.util.sample_interval import derive_samples_from_range_expr
+from offsite.util.time import start_timer, stop_timer
 
 
 def parse_program_args_app_tune_node() -> Namespace:
@@ -81,7 +82,10 @@ def parse_program_args_app_tune_node() -> Namespace:
     parser.add_argument('--no-blocksizes', action='store_true', default=False,
                         help='Skip kernel block size prediction.')
     # Parse program arguments.
-    return parser.parse_args()
+    args = parser.parse_args()
+    # ...
+    args.nrange = derive_samples_from_range_expr(args.nrange, args.mode) if args.nrange else None
+    return args
 
 
 def tune():
@@ -97,44 +101,50 @@ def tune():
     """
     config: Config = offsite.config.offsiteConfig
     assert config.args.mode in [ProgramModeType.MODEL, ProgramModeType.RUN]
+
     # Start timer.
-    start_time = time()
+    ts = start_timer()
+
     # Open database.
     db_session: Session = open_db(config.args.db)
+
     # Parser phase.
     print('#' * 80 + '\n\nParser phase...\n')
     if config.args.verbose:
         print('#' * 80)
-    # Read tuning scenario.
+    # ... read tuning scenario.
     config.scenario = TuningScenario.from_file(config.args.scenario)
+    config.scenario.solver = config.scenario.solver.to_database(db_session)
     assert config.scenario.solver.type in [SolverType.GENERIC, SolverType.ODE]
-    # Parse YAML descriptions and create corresponding Python objects ...
+    # ... parse YAML descriptions and create corresponding Python objects ...
     machine, skeletons, templates, methods, ivps = parse_verify_yaml_desc(db_session, config.scenario)
-    # Print information on the parsed descriptions.
+    # ... print information on the parsed descriptions.
     if config.args.verbose:
         print_yaml_desc(machine, skeletons, templates, methods, ivps)
+
     # Training phase.
     print('#' * 80 + '\n\nTraining phase...\n')
-    # Train database with communication cost benchmarks.
+    # ... train database with communication cost benchmarks.
     if config.args.verbose:
         print('  * Communication costs...', end='', flush=True)
     train_node_communication(db_session, config.scenario, machine, skeletons)
     if config.args.verbose:
         print(' done.')
-    # Train database with kernel block size predictions.
+    # ... train database with kernel block size predictions.
     if not config.args.no_blocksizes and (
             config.pred_model_tool == ModelToolType.KERNCRAFT or config.pred_model_tool is None):
         templates = train_kernel_blocksizes(db_session, machine, templates, methods, ivps)
-    # Train database with kernel runtime predictions.
+    # ... train database with kernel runtime predictions.
     predicted_kernels: List[Kernel] = train_kernel(db_session, machine, templates, ivps, methods)
-    # Train database with implementation variant runtime predictions.
-    train_impl_variant(db_session, machine, skeletons, predicted_kernels, ivps, methods)
+    # ... train database with implementation variant runtime predictions.
+    train_impl_variant_predictions(db_session, machine, skeletons, predicted_kernels, methods, ivps)
+
     # Close database.
     close(db_session)
+
     # Stop timer.
-    stop_time = time()
     print('\n' + '#' * 80 + '\n')
-    print('Tuning run took: {}.'.format(timedelta(seconds=round(stop_time - start_time, 0))))
+    print('Tuning run took: {}.'.format(stop_timer(ts)))
 
 
 def run():
@@ -152,43 +162,10 @@ def run():
     mapping()
     # Parse the program arguments.
     args: Namespace = parse_program_args_app_tune_node()
-    args.nrange = derive_samples(args.nrange, args.mode) if args.nrange else None
     # Create custom or default configuration.
     init_config(args)
     # Tune application.
     tune()
-
-
-def derive_samples(intv_range: str, mode: ProgramModeType):
-    if mode == ProgramModeType.MODEL:
-        sample_type = SampleType.MODEL_INNER
-    elif mode == ProgramModeType.RUN:
-        sample_type = SampleType.BENCH_INNER
-    else:
-        assert False
-
-    intervals = list()
-    # Split interval range string.
-    intv_range = intv_range.split(':')
-    assert (len(intv_range) == 3)
-    cur_sample = int(intv_range[0])
-    last_sample = int(intv_range[1])
-    incr = int(intv_range[2])
-    # First interval starts with first sample.
-    e = cur_sample + int(incr / 2)
-    intervals.append(SampleInterval(cur_sample, e, sample_type, cur_sample))
-    # Add inner intervals.
-    cur_sample += incr
-    s = e + 1
-    e += incr
-    while cur_sample < last_sample:
-        intervals.append(SampleInterval(s, e, sample_type, cur_sample))
-        cur_sample += incr
-        s = e + 1
-        e += incr
-    # Add last interval.
-    intervals.append(SampleInterval(s, last_sample, sample_type, last_sample))
-    return intervals
 
 
 # For debugging purposes.

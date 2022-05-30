@@ -1,14 +1,16 @@
 """@package tuning_scenario
 Tuning scenario passed to the different offsite applications.
+
+@author: Johannes Seiferth
 """
 
 from collections import OrderedDict
 from configparser import RawConfigParser
-from pathlib import Path
 from sys import version_info
 from typing import List, Set
 
 import attr
+from pathlib2 import Path
 
 from offsite.config import __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, \
     __tuning_scenario_ext__
@@ -37,7 +39,7 @@ class TuningScenario:
     # ... for benchmarks.
     bench_omp_barrier = attr.ib(type=Path, init=False, default=None)
     # ... for solver
-    solver = attr.ib(type=Solver, default=Solver())
+    solver = attr.ib(type=Solver, default=Solver('GENERIC_SOLVER'))
     # ... for impl skeletons.
     skeleton_dir = attr.ib(type=Set[Path], default=None)
     skeleton_path = attr.ib(type=Set[Path], default=None)
@@ -111,9 +113,16 @@ class TuningScenario:
         # ... solver.
         tag_solver = 'SOLVER'
         if tag_solver in parser:
+            tag_name = 'name'
             tag_type = 'type'
+            if bool(tag_name in parser[tag_solver]) != bool(tag_type in parser[tag_solver]):
+                raise RuntimeError('Missing entry. Both entries are required:\n[SOLVER]\nname = MY_CUSTOM_SOLVER_NAME'
+                                   '\ntype = MY_CUSTOM_SOLVER_TYPE')
+            solver_name: str = 'GENERIC_SOLVER'
+            if tag_name in parser[tag_solver]:
+                solver_name = parser[tag_solver][tag_name]
             if tag_type in parser[tag_solver]:
-                scenario_obj.solver = Solver.make_solver(parser[tag_solver][tag_type])
+                scenario_obj.solver = Solver.make_solver(solver_name, parser[tag_solver][tag_type])
         # ... impl skeleton.
         tag_skeleton = 'IMPLEMENTATION SKELETON'
         if tag_skeleton in parser:

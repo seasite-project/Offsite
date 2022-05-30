@@ -19,7 +19,6 @@ RepetitionsCommunicationOperations = 100
 
 [CODEGEN]
 idx = j
-ode_solution_vector = y
 yasksite_stencil_dir = examples/ivps/yasksite_stencils
 
 [YASKSITE]

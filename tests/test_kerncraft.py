@@ -56,13 +56,13 @@ class TestKerncraft(TestCase):
                                     paths = write_codes_to_file(codes, folder)
                             for path in paths:
                                 # Test ECM mode.
-                                expected_results = self.results_ecm[path][method.name][ivp.name]
+                                expected_results = self.results_ecm[str(path)][method.name][ivp.name]
                                 self._test_ecm_mode(path, method, ivp, expected_results)
                                 # Test bench mode.
-                                expected_results = self.results_bench[path][method.name][ivp.name]
+                                expected_results = self.results_bench[str(path)][method.name][ivp.name]
                                 # self._test_bench_mode(path, method, ivp, expected_results)
                                 # Test LC mode.
-                                expected_results = self.results_lc[path][method.name][ivp.name]
+                                expected_results = self.results_lc[str(path)][method.name][ivp.name]
                                 self._test_lc_mode(path, method, ivp, expected_results)
                 else:
                     for kernel in template.variants:
@@ -72,39 +72,38 @@ class TestKerncraft(TestCase):
                             paths = write_codes_to_file(codes, folder)
                         for path in paths:
                             # Test ECM mode.
-                            expected_results = self.results_ecm[path][method.name][None]
+                            expected_results = self.results_ecm[str(path)][method.name][None]
                             self._test_ecm_mode(path, method, None, expected_results)
                             # Test bench mode.
-                            expected_results = self.results_bench[path][method.name][None]
+                            expected_results = self.results_bench[str(path)][method.name][None]
                             # self._test_bench_mode(path, method, None, expected_results)
                             # Test LC mode.
-                            expected_results = self.results_lc[path][method.name][None]
+                            expected_results = self.results_lc[str(path)][method.name][None]
                             self._test_lc_mode(path, method, None, expected_results)
 
     results_ecm = {
-        Path('tests/tmp/Update_j.c'): {'radauIIA7': {None: {
+        'tests/tmp/Update_j.c': {'radauIIA7': {None: {
             IncoreToolType.IACA: {1: 12.0, 2: 6.0, 3: 4.0, 4: 3.0, 5: 2.4, 6: 2.0, 7: 1.7, 8: 1.5},
             IncoreToolType.OSACA: {1: 12.0, 2: 6.0, 3: 4.0, 4: 3.0, 5: 2.4, 6: 2.0, 7: 1.7, 8: 1.5}}}},
-        Path('tests/tmp/RHS_jl_InverterChain.c'): {'radauIIA7': {'InverterChain': {
+        'tests/tmp/RHS_jl_InverterChain.c': {'radauIIA7': {'InverterChain': {
             IncoreToolType.IACA: {1: 281.5, 2: 142.1, 3: 97.4, 4: 76.3, 5: 64.3, 6: 56.8, 7: 51.8, 8: 48.1},
             IncoreToolType.OSACA: {1: 224.0, 2: 113.7, 3: 79.2, 4: 63.3, 5: 54.5, 6: 49.0, 7: 45.4, 8: 42.8}}}},
-        Path('tests/tmp/RHS_lj_InverterChain.c'): {'radauIIA7': {'InverterChain': {
+        'tests/tmp/RHS_lj_InverterChain.c': {'radauIIA7': {'InverterChain': {
             IncoreToolType.IACA: {1: 56.0, 2: 28.4, 3: 19.8, 4: 15.8, 5: 13.6, 6: 12.3, 7: 11.3, 8: 10.7},
             IncoreToolType.OSACA: {1: 56.0, 2: 28.4, 3: 19.8, 4: 15.8, 5: 13.6, 6: 12.3, 7: 11.3, 8: 10.7}}}}}
 
     results_bench = {
-        Path('tests/tmp/Update_j.c'): {'radauIIA7': {None: {
-            IncoreToolType.IACA: 12.0, IncoreToolType.OSACA: 1.5}}},
-        Path('tests/tmp/RHS_jl_InverterChain.c'): {'radauIIA7': {'InverterChain': {
-            IncoreToolType.IACA: 281.5, IncoreToolType.OSACA: 48.1}}},
-        Path('tests/tmp/RHS_lj_InverterChain.c'): {'radauIIA7': {'InverterChain': {
-            IncoreToolType.IACA: 56.0, IncoreToolType.OSACA: 10.7}}}}
+        'tests/tmp/Update_j.c': {'radauIIA7': {None: {IncoreToolType.IACA: 12.0, IncoreToolType.OSACA: 1.5}}},
+        'tests/tmp/RHS_jl_InverterChain.c': {
+            'radauIIA7': {'InverterChain': {IncoreToolType.IACA: 281.5, IncoreToolType.OSACA: 48.1}}},
+        'tests/tmp/RHS_lj_InverterChain.c': {
+            'radauIIA7': {'InverterChain': {IncoreToolType.IACA: 56.0, IncoreToolType.OSACA: 10.7}}}}
 
     results_lc = {
-        Path('tests/tmp/Update_j.c'): {'radauIIA7': {None: {
+        'tests/tmp/Update_j.c': {'radauIIA7': {None: {
             IncoreToolType.IACA: {'L1': [('n', 2048)], 'L2': [('n', 16384)], 'L3': [('n', 4194304)]},
             IncoreToolType.OSACA: {'L1': [('n', 2048)], 'L2': [('n', 16384)], 'L3': [('n', 4194304)]}}}},
-        Path('tests/tmp/RHS_jl_InverterChain.c'): {'radauIIA7': {'InverterChain': {
+        'tests/tmp/RHS_jl_InverterChain.c': {'radauIIA7': {'InverterChain': {
             IncoreToolType.IACA: {
                 'L1': [('2*n*s + s', 4096), ('8*n', 4095), ('2*n', 1025)],
                 'L2': [('2*n*s + s', 32768), ('8*n', 32767), ('2*n', 8193)],
@@ -113,7 +112,7 @@ class TestKerncraft(TestCase):
                 'L1': [('2*n*s + s', 4096), ('8*n', 4095), ('2*n', 1025)],
                 'L2': [('2*n*s + s', 32768), ('8*n', 32767), ('2*n', 8193)],
                 'L3': [('2*n*s + s', 8388608), ('8*n', 8388607), ('2*n', 2097153)]}}}},
-        Path('tests/tmp/RHS_lj_InverterChain.c'): {'radauIIA7': {'InverterChain': {
+        'tests/tmp/RHS_lj_InverterChain.c': {'radauIIA7': {'InverterChain': {
             IncoreToolType.IACA: {
                 'L1': [('2*n*s + s', 4096)], 'L2': [('2*n*s + s', 32768)], 'L3': [('2*n*s + s', 8388608)]},
             IncoreToolType.OSACA: {

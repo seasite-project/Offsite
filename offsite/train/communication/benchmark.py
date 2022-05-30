@@ -1,23 +1,34 @@
 """@package train.communication.benchmark
-Definition of abstract class Benchmark.
+Definition of classes Benchmark (abstract), BenchmarkRecord and BenchmarkType.
+
+@author: Johannes Seiferth
 """
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
 from getpass import getuser
-from pathlib import Path
 from subprocess import run, CalledProcessError
 from typing import Any, Dict, List
 
 import attr
 from pandas import DataFrame
+from pathlib2 import Path
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import Session
 
 from offsite import __version__
-from offsite.config import BenchType
 from offsite.database import METADATA, insert
 from offsite.descriptions.machine import MachineState
+
+
+class BenchmarkType(Enum):
+    """Defines what type of benchmark is executed.
+
+    - OMP_BARRIER
+        OpenMP barrier benchmark.
+    """
+    OMP_BARRIER = 'omp_barrier'
 
 
 @attr.s(hash=True)
@@ -38,7 +49,7 @@ class Benchmark(ABC):
     folder: Path
         Folder to store source code in.
     """
-    type = attr.ib(type=BenchType, init=False)
+    type = attr.ib(type=BenchmarkType, init=False)
     code = attr.ib(type=str, init=False)
     folder = attr.ib(type=Path, default=Path('tmp'), init=False)
     source = attr.ib(type=Path, init=False)
@@ -125,15 +136,16 @@ class Benchmark(ABC):
             Relative path to source file created.
         """
 
-    def run(self, machine: MachineState, run_config: Dict[str, Any], save_in_db: bool = True) -> List['BenchRecord']:
+    def run(self, machine: MachineState, run_config: Dict[str, Any], save_in_db: bool = True,
+            write_to_file: bool = False) -> List['BenchRecord']:
         """Run the benchmark on a given machine.
 
         Parameters:
         -----------
         machine: MachineState
-            Machine the benchmark is ran on.
+            Machine the benchmark is run on.
         run_config: dict (key=str, value=Any)
-            Run parameters used to executed this benchmark.
+            Run parameters used to execute this benchmark.
         save_in_db: bool
             If True create valid BenchRecord database entries.
 
@@ -147,6 +159,9 @@ class Benchmark(ABC):
             self.compile(machine)
         # Run benchmark.
         data: List['BenchRecord'] = self.run_(machine, run_config, save_in_db)
+        # ... and optionally write the results to a file.
+        if write_to_file:
+            self._write2file(data)
         return data
 
     @abstractmethod
@@ -160,7 +175,7 @@ class Benchmark(ABC):
         machine: MachineState
             Machine the benchmark is ran on.
         run_config: dict (key=str, value=Any)
-            Run parameters used to executed this benchmark.
+            Run parameters used to execute this benchmark.
         save_in_db: bool
             If True create valid BenchRecord database entries.
 
@@ -227,6 +242,21 @@ class Benchmark(ABC):
         --------
         pandas.DataFrame
             Retrieved list of data records.
+        """
+        pass
+
+    @abstractmethod
+    def _write2file(self, data) -> Path:
+        """Write benchmark results to file.
+
+        Parameters:
+        -----------
+        data:
+            Obtained benchmark results.
+
+        Returns:
+        Path
+            Path of the file created.
         """
         pass
 

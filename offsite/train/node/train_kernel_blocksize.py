@@ -1,14 +1,14 @@
 """@package train.node.train_kernel_blocksize
 Functions to train the tuning database with kernel block size predictions.
+
+@author: Johannes Seiferth
 """
 
-from datetime import timedelta
 from multiprocessing import cpu_count, Pool
-from pathlib import Path
-from time import time
 from traceback import print_exc
 from typing import List, Optional
 
+from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
@@ -19,6 +19,7 @@ from offsite.descriptions.ode import IVP, ODEMethod, ivp_grid_size, corrector_st
 from offsite.solver import SolverType
 from offsite.train.node.util.kerncraft_utils import execute_kerncraft_lc_mode, parse_kerncraft_output_lc_mode
 from offsite.util.math_utils import eval_math_expr, solve_equation
+from offsite.util.time import start_timer, stop_timer
 
 
 def train_kernel_blocksizes(
@@ -47,15 +48,20 @@ def train_kernel_blocksizes(
     config: Config = offsite.config.offsiteConfig
     if config.args.verbose:
         print('  * Kernel block sizes...', end='', flush=True)
-    start_time_block = time()
+
+    # Start timer.
+    ts = start_timer()
+
     if config.scenario.solver.type == SolverType.ODE:
         templates = train_kernel_blocksizes_ode(db_session, machine, templates, methods, ivps)
     elif config.scenario.solver.type == SolverType.GENERIC:
         templates = train_kernel_blocksizes_generic(db_session, machine, templates)
     templates = [template.to_database(db_session) for template in templates]
-    stop_time_block = time()
+
+    # Stop timer.
     if config.args.verbose:
-        print(' done. Duration {}.'.format(timedelta(seconds=round(stop_time_block - start_time_block, 0))))
+        print(' done. Duration {}.'.format(stop_timer(ts)))
+
     return templates
 
 
@@ -262,17 +268,17 @@ def compute_kernel_blocking_sizes(path: Path, pmodel_kernel: PModelKernel, machi
     layer_conditions_per_cache_lvl = dict()
     if out == 'LC failed':
         # LC mode failed on this kernel. We instead use the working set to determine blocking sizes.
-        # .. for L1 cache
+        # ... for L1 cache.
         bsizes = pmodel_kernel.determine_max_n_of_working_sets_for_cache_lvl(method, machine.l1CacheElements)
         for idx, bs in enumerate(bsizes):
             bsizes[idx] = adjust_blocksize(bs, lc_safety_margin, elem_per_cl)
         layer_conditions_per_cache_lvl['L1'] = bsizes
-        # .. for L2 cache
+        # ... for L2 cache.
         bsizes = pmodel_kernel.determine_max_n_of_working_sets_for_cache_lvl(method, machine.l2CacheElements)
         for idx, bs in enumerate(bsizes):
             bsizes[idx] = adjust_blocksize(bs, lc_safety_margin, elem_per_cl)
         layer_conditions_per_cache_lvl['L2'] = bsizes
-        # .. for L3 cache
+        # ... for L3 cache.
         bsizes = pmodel_kernel.determine_max_n_of_working_sets_for_cache_lvl(method, machine.l3CacheElements)
         for idx, bs in enumerate(bsizes):
             bsizes[idx] = adjust_blocksize(bs, lc_safety_margin, elem_per_cl)

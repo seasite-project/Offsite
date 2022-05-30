@@ -1,13 +1,17 @@
 """@package train.node.records.impl_variant
 Definition of classes ImplVariant and ImplVariantRecord.
+
+@author: Johannes Seiferth
 """
 
 from datetime import datetime
 from getpass import getuser
+from multiprocessing import cpu_count, Pool
+from traceback import print_exc
 from typing import Dict, List, Optional, Tuple
 
 import attr
-from pandas import read_sql_query, DataFrame
+from pandas import read_sql_query, DataFrame, Series
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Query, Session
@@ -15,7 +19,7 @@ from sympy import simplify
 
 from offsite import __version__
 from offsite.codegen.codegen_util import create_variant_name
-from offsite.database import METADATA, bulk_insert, insert
+from offsite.database import METADATA, insert
 from offsite.descriptions.impl.impl_skeleton import ImplSkeleton
 from offsite.descriptions.impl.kernel_template import Kernel
 from offsite.util.math_utils import eval_math_expr
@@ -57,7 +61,7 @@ class ImplVariant:
                      sqlite_autoincrement=True)
 
     def to_database(self, db_session: Session) -> 'ImplVariant':
-        """Push this ECM record object to the database.
+        """Push this impl variant object to the database.
 
         Parameters:
         -----------
@@ -115,7 +119,7 @@ class ImplVariant:
         loaded_kernels: KernelDict = dict()
         for variant in variants:
             # Attribute kernels.
-            variant.kernels = variant.kernels_serial.split(',')
+            variant.kernels = list(map(int, variant.kernels_serial.split(',')))
             # Attribute clust/node_lvl_comm.
             clust_lvl_comm, node_lvl_comm, loaded_kernels = ImplVariant.count_kernel_communication(
                 db_session, variant.kernels, loaded_kernels)
@@ -223,7 +227,7 @@ class ImplVariantRecord:
     first = attr.ib(type=int, init=False)
     last = attr.ib(type=int, init=False)
     prediction = attr.ib(type=str)
-    mode = attr.ib(type=str)
+    pred_mode = attr.ib(type=str)
     db_id = attr.ib(type=int, init=False)
 
     # Database information.
@@ -313,26 +317,24 @@ class ImplVariantRecord:
             ImplVariantRecord.impl.is_(impl.db_id), ImplVariantRecord.machine.is_(machine),
             ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
             ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.cores.is_(cores),
-            ImplVariantRecord.frequency.is_(frequency), ImplVariantRecord.mode.is_(mode)).all())
+            ImplVariantRecord.frequency.is_(frequency), ImplVariantRecord.pred_mode.is_(mode)).all())
 
     @staticmethod
-    def update(db_session: Session, records: List['ImplVariantRecord']):
+    def update(db_session: Session, records: DataFrame):
         """Update data records in ImplVariantPrediction table with new impl variant prediction data.
 
         Parameters:
         -----------
         db_session: sqlalchemy.orm.session.Session
             Used database session.
-        impl_variant_records: list
+        records: DataFrame
             Impl variant prediction records.
-        mode: str
-            Application mode used to obtain data.
 
         Returns:
         --------
         -
         """
-        bulk_insert(db_session, records)
+        records.to_sql(name='impl_variant_prediction', con=db_session.connection(), if_exists='append', index=False)
 
     @staticmethod
     def remove_records(db_session: Session, impls: List[int], machine: int, compiler: int, method: int, ivp: int,
@@ -407,54 +409,99 @@ class ImplVariantRecord:
         """
         query: Query
         if ode_size:
-            query = db_session.query(ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
-                                     ImplVariantRecord.prediction).filter(
+            query: Query = db_session.query(
+                ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
+                ImplVariantRecord.prediction).filter(
                 ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
                 ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
                 ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
                 ImplVariantRecord.cores.is_(cores), ImplVariantRecord.first.is_(ode_size),
                 ImplVariantRecord.last.is_(ode_size)).order_by(ImplVariantRecord.impl)
         else:
-            query = db_session.query(ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
-                                     ImplVariantRecord.prediction).filter(
+            query: Query = db_session.query(
+                ImplVariantRecord.impl, ImplVariantRecord.first, ImplVariantRecord.last,
+                ImplVariantRecord.prediction).filter(
                 ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
                 ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
                 ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
                 ImplVariantRecord.cores.is_(cores)).order_by(ImplVariantRecord.impl)
         return read_sql_query(query.statement, db_session.bind, index_col='impl')
 
-    @staticmethod
-    def fuse_equal_records(records: List['ImplVariantRecord']) -> List['ImplVariantRecord']:
-        """
-        Reduce total number of records by combining adjacent intervals. Adjacent intervals can be combined if they give
-        the same result (e.g prediction, ...).
 
-        Parameters:
-        -----------
-        records: list of ImplVariantRecord
-            Results for a set of SampleInterval objects.
+def fuse_equal_impl_records(records: DataFrame) -> DataFrame:
+    """
+    Reduce total number of records by combining adjacent intervals. Adjacent intervals can be combined if they give the
+    same prediction.
 
-        Returns:
-        --------
-        List of ImplVariantRecord
-            Reduced set of the input ImplVariantRecord objects.
-        """
-        if len(records) <= 1:
-            return records
-        fused_records: List[ImplVariantRecord] = list()
-        # Fuse neighbouring intervals that give the same prediction.
-        cur: Optional[ImplVariantRecord] = None
-        for record in records:
-            # Test if both intervals have the same prediction.
-            if cur is not None and cur.impl == record.impl and simplify(cur.prediction) == simplify(record.prediction):
-                # Increase upper bound of current interval.
-                cur.last = record.last
+    Parameters:
+    -----------
+    records: DataFrame
+        Impl variant records.
+
+    Returns:
+    --------
+    DataFrame
+        Reduced set of impl variant records.
+    """
+    if records.empty:
+        return records
+    fused_records: List[Dict] = list()
+    errors: List[str] = list()
+    # Initialize worker thread pool.
+    pool: Pool = Pool(max(cpu_count() - 1, 1))
+    # Fuse neighbouring intervals that give the same prediction.
+    groups_impl = records.groupby(records.impl)
+    for group_impl in groups_impl:
+        recs = groups_impl.get_group(group_impl[0])
+        pool.apply_async(  # comma after args needed here!
+            __fuse_equal_impl_records, callback=fused_records.extend, error_callback=errors.append, args=(recs,))
+    # Wait for all threads and collect results.
+    pool.close()
+    pool.join()
+    # Raise error if failed.
+    if errors:
+        raise RuntimeError('Failed to fuse records: Error in worker threads.')
+    fused_records_df = DataFrame(fused_records)
+    return fused_records_df
+
+
+def __fuse_equal_impl_records(records: DataFrame) -> List[Dict]:
+    def __series_to_record(ser: Series):
+        return {'impl': int(ser.get('impl')), 'machine': int(ser.get('machine')), 'compiler': int(ser.get('compiler')),
+                'method': int(ser.get('method')), 'ivp': int(ser.get('ivp')), 'cores': int(ser.get('cores')),
+                'frequency': float(ser.get('frequency')), 'first': int(ser.get('first')), 'last': int(ser.get('last')),
+                'prediction': str(ser.get('prediction')), 'mode': str(ser.get('mode'))}
+
+    fused_records: List[Dict] = list()
+    try:
+        for group_cores in records.groupby(['cores']):
+            records = group_cores[1].sort_values(by=['first'])
+            #
+            preds = records.prediction.to_numpy()
+            if (preds[0] != preds).any():
+                cur: Optional[Dict] = None
+                for _, rec in records.iterrows():
+                    rec: Series
+                    # Test if both intervals have the same prediction.
+                    if cur is not None and simplify(cur['prediction']) == simplify(rec['prediction']):
+                        # Increase upper bound of current interval.
+                        cur['last'] = rec.get('last')
+                    else:
+                        # Save interval.
+                        if cur is not None:
+                            fused_records.append(cur)
+                        # Update current record, result and impl.
+                        cur = __series_to_record(rec)
+                # Save final interval.
+                assert cur is not None
+                fused_records.append(cur)
             else:
-                # Save interval.
-                if cur is not None:
-                    fused_records.append(cur)
-                # Update current record, result and impl.
-                cur = record
-        # Save final interval.
-        fused_records.append(cur)
+                rec = __series_to_record(records.iloc[0])
+                rec['last'] = int(records.iloc[-1].get('last'))
+                fused_records.append(rec)
         return fused_records
+    except Exception as e:
+        # Print stack trace of the executing worker thread.
+        print_exc()
+        print('')
+        raise e

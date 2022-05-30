@@ -1,17 +1,19 @@
 """@package descriptions.impl.impl_skeleton
 Definition of class ImplSkeleton.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
 from datetime import datetime
 from getpass import getuser
-from pathlib import Path
 from typing import Dict, List
 
 import attr
+from pathlib2 import Path
 from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Table
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 from offsite import __version__
 from offsite.codegen.code_dsl.code_dsl import parse_lark_grammar
@@ -19,7 +21,7 @@ from offsite.codegen.code_dsl.code_tree import CodeTree, CodeTreeGenerator
 from offsite.config import ModelToolType, __impl_skeleton_ext__
 from offsite.database import METADATA, insert
 from offsite.descriptions.impl.kernel_template import KernelTemplate
-from offsite.descriptions.parser import load_yaml, deserialize_obj, serialize_obj
+from offsite.descriptions.parser import load_yaml, deserialize_obj, serialize_obj, ComputationDict
 
 
 @attr.s
@@ -100,7 +102,7 @@ class ImplSkeleton:
         # add end
         # Attribute code_tree.
         lark_code = parse_lark_grammar(yaml['code'])
-        code_tree = CodeTreeGenerator().generate(lark_code, {})
+        code_tree = CodeTreeGenerator().generate(lark_code, ComputationDict())
         code_tree = deepcopy(code_tree)
         # Parse code tree to collect information for attributes communication_operations and kernels.
         # .. communication operations.
@@ -146,8 +148,8 @@ class ImplSkeleton:
             Created ImplSkeleton object.
         """
         try:
-            skeleton: ImplSkeleton = db_session.query(
-                ImplSkeleton).filter(ImplSkeleton.name.like(impl_skeleton_name)).one()
+            skeleton: ImplSkeleton = db_session.query(ImplSkeleton).filter(
+                ImplSkeleton.name.like(impl_skeleton_name)).one()
         except NoResultFound:
             raise RuntimeError('Unable to load ImplSkeleton object from database!')
         except MultipleResultsFound:

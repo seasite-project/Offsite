@@ -1,16 +1,18 @@
 """@package descriptions.ivp
 Definitions of classes IVP and IVPCharacteristic.
+
+@author: Johannes Seiferth
 """
 
 from datetime import datetime
 from getpass import getuser
-from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import attr
+from pathlib2 import Path
 from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Table
+from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 
 import offsite.config
 from offsite import __version__
@@ -327,7 +329,7 @@ class IVP:
         return name
 
 
-def parse_ivp(path: Path, tool: ModelToolType) -> IVP:
+def parse_ivp(path: Path, tool: Optional[ModelToolType] = None) -> IVP:
     """Parse IVP description YAML file and return IVP object.
 
     Parameters:

@@ -1,5 +1,7 @@
 """@package config
 Configuration options of the off_tune application.
+
+@author: Johannes Seiferth
 """
 
 from argparse import Namespace
@@ -43,15 +45,6 @@ class ModelToolType(Enum):
     YASKSITE = 'yasksite'
 
 
-class BenchType(Enum):
-    """Defines what type of benchmark is executed.
-
-    - OMP_BARRIER
-        OpenMP barrier benchmark.
-    """
-    OMP_BARRIER = 'omp_barrier'
-
-
 class IncoreToolType(Enum):
     """Defines what tool is used to determine the in-core model.
 
@@ -75,20 +68,6 @@ class SolverType(Enum):
 class SolverSpecificTableType(Enum):
     IVP = 'IVP'
     ODE_METHOD = 'ODE_METHOD'
-
-
-class GeneratedCodeLanguageType(Enum):
-    """Defines what type of code is generated.
-
-    - C
-        C style code.
-    - CPP
-        C++ style code.
-
-    """
-    C = 'C'
-    CPP = 'CPP'
-    CPP_MPI = 'MPI'
 
 
 @attr.s
@@ -115,9 +94,6 @@ class Config:
     repetitions_communication_operations = attr.ib(type=int, default=100)
     # ... for code generation
     var_idx = attr.ib(type=str, default='j')
-    var_first_idx = attr.ib(type=str, default='first')
-    var_last_idx = attr.ib(type=str, default='last')
-    ode_solution_vector = attr.ib(type=str, default='y')
     yasksite_stencil_dir = attr.ib(type=str, default='examples/ivps/yasksite_stencils')
     # ... for LIKWID
     likwid_set_frequencies = attr.ib(type=str, default='likwid-setFrequencies')
@@ -194,15 +170,6 @@ class Config:
             tag_idx = 'idx'
             if tag_idx in parser[tag_codegen]:
                 config_obj.var_idx = parser[tag_codegen][tag_idx]
-            tag_first = 'first_idx'
-            if tag_first in parser[tag_codegen]:
-                config_obj.var_first_idx = parser[tag_codegen][tag_first]
-            tag_last = 'last_idx'
-            if tag_last in parser[tag_codegen]:
-                config_obj.var_last_idx = parser[tag_codegen][tag_last]
-            tag_sol_vec = 'ode_solution_vector'
-            if tag_sol_vec in parser[tag_codegen]:
-                config_obj.ode_solution_vector = parser[tag_codegen][tag_sol_vec]
             tag_yasksite_stencil_dir = 'yasksite_stencil_dir'
             if tag_yasksite_stencil_dir in parser[tag_codegen]:
                 config_obj.yasksite_stencil_dir = parser[tag_codegen][tag_yasksite_stencil_dir]

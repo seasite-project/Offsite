@@ -1,6 +1,8 @@
 """@package codegen.code_dsl.code_node
 Definitions of classes CodeNodeType, CodeNode, RootNode, LoopNode, CommunicationClustLvlNode, CommunicationNodeLvlNode,
 ComputationNode, SwapNode, KernelNode, PModelNode.
+
+@author: Johannes Seiferth
 """
 
 from abc import abstractmethod
@@ -93,6 +95,10 @@ class CodeNode:
 
     @abstractmethod
     def to_implementation_codeline(self) -> str:
+        pass
+
+    @abstractmethod
+    def to_kernel_codeline(self) -> str:
         pass
 
     @abstractmethod
@@ -221,7 +227,7 @@ class LoopNode(CodeNode):
     start: str
         Start value of the loop variable.
     boundary: str
-        Break condition of the the loop. (assuming < condition).
+        Break condition of the loop. (assuming < condition).
     optional_args: list of str
         Optional loop arguments (unroll, assign, ...)
     optimize_unroll: int
@@ -340,8 +346,8 @@ class LoopNode(CodeNode):
         config: Config = offsite.config.offsiteConfig
         # Adjust loop boundaries if the loop runs over the system dimension.
         if self.var == config.var_idx:
-            first: str = config.var_first_idx
-            last: str = config.var_last_idx
+            first: str = 'first'
+            last: str = 'last'
             comparator = '<='
         else:
             first: str = self.start

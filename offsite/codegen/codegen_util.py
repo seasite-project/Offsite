@@ -1,13 +1,18 @@
 """@package codegen.codegen_util.py
 Util functions used during code generation.
+
+@author: Johannes Seiferth
 """
 
-from pathlib import Path
+from multiprocessing import cpu_count, Pool
 from re import sub
 from shlex import split as shlex_split
 from shutil import which
 from subprocess import run, PIPE, CalledProcessError
+from sys import maxsize as sys_maxsize
 from typing import Dict, List, Optional, Tuple, Union
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite.config import Config
@@ -115,11 +120,11 @@ def substitute_rhs_call(computation: str, component: str, input_vector: str,
     assert '%RHS' in computation
     config: Config = offsite.config.offsiteConfig
     component = component.strip()
-    # Substitute %in keyword with the variable name defined in the given config.
-    component = component.replace("%in", input_vector)
+    # Substitute keywords %in and %last_idx.
+    component = component.replace('%in', input_vector)
+    component = component.replace('%last_idx', 'last')
     # Replace index keyword %idx and %last_idx with the variable names defined in the given config.
     component = component.replace('%idx', config.var_idx)
-    component = component.replace('%last_idx', config.var_last_idx)
     # Replace constants in component string.
     for constant_name, constant_value in constants:
         regex = r'(?![a-zA-Z0-9]-_)' + constant_name + r'(?![a-zA-Z0-9-_])'
@@ -233,7 +238,7 @@ def write_tiling_loop(block_varname: str, indent_lvl: int) -> str:
     """
     bs_var = 'bs_{}'.format(block_varname)
     limit_var = 'limit_{}'.format(block_varname)
-    block_var = 'B_{}'.format(block_varname)
+    block_var = 'B'.format(block_varname)
     #
     loop = indent(indent_lvl) + 'int {}, {};\n'.format(bs_var, limit_var)
     loop += indent(indent_lvl) + 'for (int jj=first, {0}=imin({1}, last-first+1), '.format(bs_var, block_var)
@@ -349,7 +354,8 @@ def format_codefile(path: Path):
             raise RuntimeWarning('Formatting file {} with indent failed: {}'.format(path, error))
 
 
-def write_codes_to_file(codes: Dict[str, str], folder: Path = None, suffix: str = '.c') -> List[Path]:
+def write_codes_to_file(codes: Dict[str, str], folder: Path = None, suffix: str = '.c', num_workers: int = sys_maxsize,
+                        format_code: bool = True) -> List[Path]:
     """Write codes to file.
 
     Parameters:
@@ -360,45 +366,41 @@ def write_codes_to_file(codes: Dict[str, str], folder: Path = None, suffix: str 
         Relative path to folder that will contain the written code files.
     suffix: str
         File suffix used for all generated codes files.
+    num_workers: int
+        Number of worker threads used to write code files.
+    format_code: bool
+        Use indent to format the code.
 
     Returns:
     --------
     list of Path
         Written code files.
     """
-    # Create folder if it does not yet exist.
-    if folder is not None:
-        folder = Path(folder)
-        if folder and not folder.exists():
-            folder.mkdir(parents=True)
-    # Write code to file.
     written_files: List[Path] = list()
-    for filename, code in codes.items():
-        path = Path('{}{}'.format(filename, suffix))
-        if folder is not None:
-            path = folder / path
-        with path.open('w') as file_handle:
-            file_handle.write(code)
-        written_files.append(path)
-        # Replace newline characters in printf commands.
-        try:
-            cmd = ['sed', '-i', 's/§n/n/g', '{}'.format(path)]
-            run(cmd, check=True, stdout=PIPE).stdout
-        except CalledProcessError as error:
-            raise RuntimeError('Unable to substitute newline character stubs in {}: {}'.format(path, error))
-        # Replace tabulator characters in printf commands.
-        try:
-            cmd = ['sed', '-i', 's/§t/t/g', '{}'.format(path)]
-            run(cmd, check=True, stdout=PIPE).stdout
-        except CalledProcessError as error:
-            raise RuntimeError('Unable to substitute tabulator character stubs in {}: {}'.format(path, error))
-    # Format code files.
-    for file in written_files:
-        format_codefile(file)
+    if num_workers > 1:
+        # Create worker threads ...
+        num_workers = min(cpu_count() - 1, len(codes), num_workers)
+        num_workers = max(num_workers, 1)
+        # ... and init the worker pool.
+        pool = Pool(num_workers)
+        errors = list()
+        for file_name, code in codes.items():
+            pool.apply_async(write_code_to_file, args=(code, file_name, folder, suffix, format_code),
+                             callback=written_files.append, error_callback=errors.append)
+        # Wait for threads.
+        pool.close()
+        pool.join()
+        # Raise error if failed.
+        if errors:
+            raise RuntimeError('Failed to write code to files: Error in worker threads.')
+    else:
+        for file_name, code in codes.items():
+            written_files.append(write_code_to_file(code, file_name, folder, suffix, format_code))
     return written_files
 
 
-def write_code_to_file(code_str: str, file_name: str, folder: Path = None, suffix: str = '.c') -> Path:
+def write_code_to_file(
+        code_str: str, file_name: str, folder: Path = None, suffix: str = '.c', format_code: bool = True) -> Path:
     """Write code to file.
 
     Parameters:
@@ -411,6 +413,8 @@ def write_code_to_file(code_str: str, file_name: str, folder: Path = None, suffi
         Relative path to folder that will contain the written code file.
     file_suffix: str
         File suffix used for the generated codes file.
+    format_code: bool
+        Use indent to format the code.
 
     Returns:
     --------
@@ -441,5 +445,6 @@ def write_code_to_file(code_str: str, file_name: str, folder: Path = None, suffi
     except CalledProcessError as error:
         raise RuntimeError('Unable to substitute tabulator character stubs in {}: {}'.format(file_path, error))
     # Format code file.
-    format_codefile(file_path)
+    if format_code:
+        format_codefile(file_path)
     return file_path

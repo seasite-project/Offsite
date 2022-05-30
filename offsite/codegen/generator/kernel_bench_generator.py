@@ -1,13 +1,15 @@
 """@package codegen.generator.kernel_bench_generator
 Definition of class KernelBenchCodeGenerator.
+
+@author: Johannes Seiferth
 """
 
 from copy import deepcopy
-from pathlib import Path
 from re import sub
 from typing import Dict, List, Optional, Tuple, Union
 
 import attr
+from pathlib2 import Path
 from sortedcontainers import SortedDict
 
 import offsite.config
@@ -114,7 +116,6 @@ class KernelBenchCodeGenerator:
         KernelBenchFiles
             Paths to generated code files.
         """
-        config: Config = offsite.config.offsiteConfig
         # Set some members to match current code generation.
         code_tree: CodeNode = deepcopy(kernel.code_tree).root
 
@@ -122,10 +123,12 @@ class KernelBenchCodeGenerator:
         self.split_stack = dict()
 
         # Determine the used input vector.
-        if 'RHS_input' in kernel.template.codegen:
+        try:
             input_vector = kernel.template.codegen['RHS_input']
-        else:
-            input_vector = config.ode_solution_vector
+        except KeyError:
+            raise RuntimeError(
+                'Kernel template {} is missing required entry \'RHS_input\'.'.format(kernel.template.name))
+
         # Generate kernel code tree.
         self.generate_kernel_tree(code_tree, kernel, method, input_vector)
         # Read loop split information from template.
@@ -261,7 +264,6 @@ class KernelBenchCodeGenerator:
         --------
         -
         """
-        config: Config = offsite.config.offsiteConfig
         # Write eval_range function.
         rhs_func_str = 'inline void eval_range('
         rhs_func_str += 'int first, int last, double t, const double *%in, double *f) {\n'
@@ -273,7 +275,8 @@ class KernelBenchCodeGenerator:
         rhs_func_str += ivp.code_eval_component
         rhs_func_str += '}\n'
         # Replace solution vector stubs.
-        rhs_func_str = rhs_func_str.replace('%in', config.ode_solution_vector)
+        input_vec = 'y'
+        rhs_func_str = rhs_func_str.replace('%in', input_vec)
         # Replace IVP constants.
         constants: Optional[List[Tuple[str, Union[str, float, int]]]] = ivp.constants.as_tuple()
         for name, desc in ivp.constants.items():

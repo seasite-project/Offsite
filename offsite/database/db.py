@@ -1,5 +1,7 @@
 """@package database.db
 Definition of database functions.
+
+@author: Johannes Seiferth
 """
 
 from typing import Any, List

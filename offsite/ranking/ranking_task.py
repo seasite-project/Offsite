@@ -1,5 +1,7 @@
 """@package ranking.ranking_task
 Definitions of classes RankTask, RankOrderTask and RankPercentTask.
+
+@author: Johannes Seiferth
 """
 
 from enum import Enum
@@ -59,7 +61,7 @@ class RankTask:
 
 @attr.s
 class RankOrderTask(RankTask):
-    """Representation of a ranking by variant order task.
+    """Representation of a "ranking by variant order" task.
 
     Attributes:
     -----------
@@ -91,7 +93,7 @@ class RankOrderTask(RankTask):
 
 @attr.s
 class RankDeviationTask(RankTask):
-    """Representation of a ranking by variant deviation from best variant task.
+    """Representation of a "ranking by variant deviation from the best variant" task.
 
     Attributes:
     -----------

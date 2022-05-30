@@ -13,7 +13,7 @@ from offsite.descriptions.ode.ivp import IVP
 
 class TestIVP(TestCase):
     def setUp(self):
-        self.db_session = open_db('test_database.database')
+        self.db_session = open_db('test_database.db')
 
     def tearDown(self):
         rollback(self.db_session)

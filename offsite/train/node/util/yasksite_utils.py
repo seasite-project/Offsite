@@ -1,11 +1,14 @@
 """@package train.node.util.yasksite_util
 Utility functions to use the yasksite tool.
+
+@author: Johannes Seiferth
 """
 
 from os import environ
-from pathlib import Path
 from subprocess import run, PIPE, CalledProcessError
 from typing import Dict, List, Optional
+
+from pathlib2 import Path
 
 import offsite.config
 from offsite.config import Config
