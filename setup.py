@@ -64,18 +64,17 @@ setup(
 
     install_requires=[
         'argparse>=1.4.0',
-        'attrs>=21.2.0',
-        'datetime>=4.3',
-        'kerncraft==0.8.12',
+        'attrs>=21.4.0',
+        'kerncraft==0.8.14',
         'lark-parser>=0.12.0',
-        'matplotlib>=3.4.2',
-        'numpy>=1.21.4',
-        'osaca>=0.4.7',
-        'pandas>=1.3.4',
+        'matplotlib>=3.5.2',
+        'numpy>=1.21.6',
+        'osaca==0.4.8',
+        'pandas>=1.3.5',
         'pathlib2>=2.3.7',
         'pycparser==2.21',
-        'ruamel.yaml>=0.17.17',
-        'sqlalchemy>=1.4.27',
+        'ruamel.yaml>=0.17.21',
+        'sqlalchemy>=1.4.36',
         'sortedcontainers>=2.4.0',
         'sympy>=1.9',
     ],
@@ -90,6 +89,7 @@ setup(
             # Code generator.
             'offsite_codegen=offsite.apps.offsite_codegen_db:run',
             'offsite_codegen_from_yaml=offsite.apps.offsite_codegen_yaml:run',
+            # Online tuning.
             'offsite_gensolver=offsite.apps.offsite_gensolver:run',
             # Auxiliary apps.
             'offsite_db2name=offsite.apps.auxiliary.offsite_db2name:run',

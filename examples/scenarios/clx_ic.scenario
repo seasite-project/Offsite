@@ -19,4 +19,4 @@ path = examples/ivps/InverterChain.ivp
 path = examples/methods/implicit/radauIIA7.ode
 
 [BENCHMARK]
-omp_barrier = examples/bench/OMP_BARRIER_node17_icc2021.4.0.bench
+omp_barrier = examples/bench/OMP_BARRIER_CascadelakeSP_Gold-6248_icc19.0.2.187.bench
