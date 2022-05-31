@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 404
+#define VARIANT_ID 20
 
 #include <math.h>
 #include "RHS_Medakzo.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-404\n");
+      printf ("\n#ImplVariant-20\n");
     }
 #endif
 #pragma omp barrier
-//RHS_predictor %11
+//RHS_predictor %15
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -40,10 +40,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=11\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=15\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=11\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=15\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -59,7 +59,7 @@ timestep (const int me, const int first, const int last, double t, double h)
 	F = swp_tmp;
       }
 
-//LC_RHS %31
+//LC_RHS %4
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -95,10 +95,10 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=31\t#Threads=%d\t%.20e\n",
-		    omp_get_num_threads (), T / 1e9 / n);
+	    printf ("#Kernel=4\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+		    T / 1e9 / n);
 #else
-	    printf ("#Kernel=31\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=4\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
@@ -112,7 +112,7 @@ timestep (const int me, const int first, const int last, double t, double h)
     F = swp_tmp;
   }
 
-//LC_RHS_Approx_Update %33
+//LC_RHS_Approx_Update %6
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -146,10 +146,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=33\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=6\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=33\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=6\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }

@@ -9,6 +9,7 @@ double *tmp;
 double f;
 double *Fs;
 double *Fn;
+double tmp_s;
 
 static void
 allocate_data_structures ()

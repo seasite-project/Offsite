@@ -203,7 +203,7 @@ class ImplCodeGeneratorC(ImplCodeGenerator):
         rhs_func_str += '\n'
         # Write eval_range function.
         rhs_func_str += 'static inline void eval_range('
-        rhs_func_str += 'int first, int last, double t, const double *{}, double *f) {\n'
+        rhs_func_str += 'int first, int last, double t, const double *%in, double *f) {\n'
         rhs_func_str += ivp.code_eval_range
         rhs_func_str += '}\n'
         # Write eval_component function.

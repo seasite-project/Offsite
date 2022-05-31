@@ -1,6 +1,6 @@
 #pragma once
 
-#define VARIANT_ID 360
+#define VARIANT_ID 392
 
 #include <math.h>
 #include "RHS_Medakzo.h"
@@ -16,11 +16,11 @@ timestep (const int me, const int first, const int last, double t, double h)
 #ifdef INSTRUMENT
   if (me == 0)
     {
-      printf ("\n#ImplVariant-360\n");
+      printf ("\n#ImplVariant-392\n");
     }
 #endif
 #pragma omp barrier
-//RHS_LC_predictor %13
+//RHS_LC_predictor %17
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -64,10 +64,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=13\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=17\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=13\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=17\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }
@@ -83,7 +83,7 @@ timestep (const int me, const int first, const int last, double t, double h)
 	Ycur = swp_tmp;
       }
 
-//RHS_LC %27
+//RHS_LC %31
 #ifdef INSTRUMENT
       {
 #pragma omp barrier
@@ -130,10 +130,10 @@ timestep (const int me, const int first, const int last, double t, double h)
 	  {
 	    double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	    printf ("#Kernel=27\t#Threads=%d\t%.20e\n",
+	    printf ("#Kernel=31\t#Threads=%d\t%.20e\n",
 		    omp_get_num_threads (), T / 1e9 / n);
 #else
-	    printf ("#Kernel=27\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	    printf ("#Kernel=31\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
 	  }
       }
@@ -148,7 +148,7 @@ timestep (const int me, const int first, const int last, double t, double h)
     Ycur = swp_tmp;
   }
 
-//RHS_Approx_Update %2
+//RHS_Approx_Update %8
 #ifdef INSTRUMENT
   {
 #pragma omp barrier
@@ -158,8 +158,15 @@ timestep (const int me, const int first, const int last, double t, double h)
 	time_snap_start (&time);
       }
 #endif
+#pragma ivdep
+    for (int j = first; j <= last; ++j)
+      {
+	y[j] =
+	  h * 0.220462211176770 *
+	  (eval_component (j, t + 0.0885879595126800 * h, Yprev[0]));
+      }
 #pragma nounroll_and_jam
-    for (int i = 0; i < 4; ++i)
+    for (int i = 1; i < 4; ++i)
       {
 #pragma ivdep
 	for (int j = first; j <= last; ++j)
@@ -173,10 +180,10 @@ timestep (const int me, const int first, const int last, double t, double h)
       {
 	double T = time_snap_stop (&time);
 #ifdef _OPENMP
-	printf ("#Kernel=2\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
+	printf ("#Kernel=8\t#Threads=%d\t%.20e\n", omp_get_num_threads (),
 		T / 1e9 / n);
 #else
-	printf ("#Kernel=2\t#Threads=1\t%.20e\n", T / 1e9 / n);
+	printf ("#Kernel=8\t#Threads=1\t%.20e\n", T / 1e9 / n);
 #endif
       }
   }

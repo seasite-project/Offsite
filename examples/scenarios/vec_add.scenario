@@ -1,0 +1,16 @@
+[MACHINE]
+path = examples/machines/node17.yml
+compiler = icc
+
+[SOLVER]
+name = VEC_ADD
+type = SOLVER
+
+[IMPLEMENTATION SKELETON]
+path = examples/impls/vec_add/A.impl
+
+[KERNEL TEMPLATE]
+path = examples/kernels/vec_add/VecAdd.kernel
+
+[BENCHMARK]
+omp_barrier = examples/bench/OMP_BARRIER_node17_icc2021.4.0.bench
