@@ -1,0 +1,21 @@
+[PREDICTION]
+ModelingTool = KERNCRAFT
+IncoreModel = IACA
+
+[WORKING SETS]
+AvailableCacheSize = 0.99
+SamplesPerBorderRegion = 2
+SamplesPerInterval = 2
+StepBetweenBorderSamples = 100
+SamplesBorderRegionToMemoryLvl = 5
+SamplesMemoryLvl = 5
+MemoryLvlSampleOffset = 1.015
+
+[LAYER CONDITION]
+SafetyMargin = 2.0
+
+[BENCHMARK]
+RepetitionsCommunicationOperations = 100
+
+[CODEGEN]
+idx = j

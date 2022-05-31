@@ -1,0 +1,22 @@
+[MACHINE]
+path = examples/machines/CascadelakeSP_Gold-6248.yml
+compiler = icc
+
+[SOLVER]
+name = PIRK
+type = ODE
+
+[IMPLEMENTATION SKELETON]
+dir = examples/impls/pirk/openmp/
+
+[KERNEL TEMPLATE]
+dir = examples/kernels/pirk
+
+[IVP]
+path = examples/ivps/InverterChain.ivp
+
+[ODE METHOD]
+path = examples/methods/implicit/radauIIA7.ode
+
+[BENCHMARK]
+omp_barrier = examples/bench/OMP_BARRIER_node17_icc2021.4.0.bench
