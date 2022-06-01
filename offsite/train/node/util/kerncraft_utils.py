@@ -38,7 +38,7 @@ def check_kerncraft_version():
     # Check kerncraft version.
     required_kerncraft_version_major = 0
     required_kerncraft_version_minor = 8
-    required_kerncraft_version_micro = 12
+    required_kerncraft_version_micro = 13
     if required_kerncraft_version_major > kerncraft_version_major \
             or required_kerncraft_version_minor > kerncraft_version_minor \
             or required_kerncraft_version_micro > kerncraft_version_micro:
