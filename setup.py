@@ -65,7 +65,7 @@ setup(
     install_requires=[
         'argparse>=1.4.0',
         'attrs>=21.4.0',
-        'kerncraft==0.8.14',
+        'kerncraft==0.8.13',
         'lark-parser>=0.12.0',
         'matplotlib>=3.5.2',
         'numpy>=1.21.6',
