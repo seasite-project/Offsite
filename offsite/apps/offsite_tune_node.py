@@ -4,25 +4,26 @@ Main script of the offsite_tune_node autotuning application.
 @author: Johannes Seiferth
 """
 
-from argparse import ArgumentParser, Namespace
 from typing import List
 
+from argparse import ArgumentParser, Namespace
 from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
 from offsite import __version__
-from offsite.config import Config, ModelToolType, ProgramModeType, SolverType, __config_ext__, \
-    __tuning_scenario_ext__, init_config
+from offsite.config import Config, ModelToolType, ProgramModeType, init_config
 from offsite.database import close, open_db
 from offsite.database.db_mapping import mapping
 from offsite.descriptions.impl.kernel_template import Kernel
 from offsite.descriptions.parser_util import parse_verify_yaml_desc, print_yaml_desc
+from offsite.solver import SolverType
 from offsite.train.communication.train_communication import train_node_communication
 from offsite.train.node.train_impl import train_impl_variant_predictions
 from offsite.train.node.train_kernel import train_kernel
 from offsite.train.node.train_kernel_blocksize import train_kernel_blocksizes
 from offsite.tuning_scenario import TuningScenario
+from offsite.util.file_extensions import __config_ext__, __tuning_scenario_ext__
 from offsite.util.sample_interval import derive_samples_from_range_expr
 from offsite.util.time import start_timer, stop_timer
 
@@ -112,7 +113,7 @@ def tune():
     print('#' * 80 + '\n\nParser phase...\n')
     if config.args.verbose:
         print('#' * 80)
-    # ... read tuning scenario.
+    # ... store solver type in database.
     config.scenario = TuningScenario.from_file(config.args.scenario)
     config.scenario.solver = config.scenario.solver.to_database(db_session)
     assert config.scenario.solver.type in [SolverType.GENERIC, SolverType.ODE]

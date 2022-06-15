@@ -27,16 +27,17 @@ from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.generator.kerncraft_generator import KerncraftCodeGenerator
 from offsite.codegen.generator.kernel_bench_generator import KernelBenchCodeGenerator, KernelBenchFiles
 from offsite.codegen.generator.yasksite_generator import YasksiteCodeGenerator
-from offsite.config import Config, ModelToolType, ProgramModeType, __kernel_template_ext__
+from offsite.config import Config, ModelToolType, ProgramModeType
 from offsite.database import METADATA, insert
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.ode import ODEMethod, corrector_steps, stages
 from offsite.descriptions.ode.ivp import IVP, ivp_grid_size
 from offsite.descriptions.parser import load_yaml, ComputationDict, DatastructDict, DatastructDesc, \
     DatastructType, deserialize_obj, serialize_obj
+from offsite.util.file_extensions import __kernel_template_ext__
 from offsite.util.math_utils import eval_math_expr, solve_equation
 from offsite.util.sample_interval import SampleInterval, SampleType, create_samples_lower_border_working_set, \
-    create_samples_upper_border_working_set, create_samples_memory_lvl
+    create_samples_upper_border_working_set, create_samples_border_memory_lvl, create_samples_memory_lvl
 from offsite.util.working_sets.count_references import CountReferences
 
 # Extension of kernel files."""
@@ -877,7 +878,6 @@ class KernelRecord:
                     KernelRecord.sample_type.is_(interval.type), KernelRecord.mode.is_(mode)).one()
                 # Update data record.
                 queried_record.prediction = str(prediction)
-                # queried_record.weight = weight
             except NoResultFound:
                 # Insert new data record.
                 record = KernelRecord(
@@ -1311,14 +1311,14 @@ class PModelKernel:
         for wset_end in self.determine_max_ns_of_working_sets(machine, method):
             # Add samples in border region to previous working set.
             samples_border, start = create_samples_lower_border_working_set(
-                wset_start, wset_end, config.samples_per_border, config.step_between_border_samples, ivp)
+                wset_start, wset_end, config.samples_per_border, ivp)
             samples.extend(samples_border)
             # Switch to next working set once the end of the current set was reached.
             if start > wset_end:
                 break
             # Add samples in border region to next working set.
             samples_border, end = create_samples_upper_border_working_set(
-                start, wset_end, config.samples_per_border, config.step_between_border_samples, ivp)
+                start, wset_end, config.samples_per_border, ivp)
             samples.extend(samples_border)
             # Switch to next working set once the end of the last interval from the lower border region was reached.
             if end + 1 < start:
@@ -1366,8 +1366,8 @@ class PModelKernel:
                     # working set in next working set.
                     wset_start = start
         # Add samples in border region of data from memory and largest cache working set size.
-        samples_border, start = create_samples_lower_border_working_set(
-            wset_end + 1, sys_maxsize, config.samples_border_region_memory_lvl, config.step_between_border_samples, ivp)
+        samples_border, start = create_samples_border_memory_lvl(
+            wset_end + 1, sys_maxsize, config.samples_border_region_memory_lvl, ivp)
         samples.extend(samples_border)
         # Add samples in memory region.
         samples.extend(

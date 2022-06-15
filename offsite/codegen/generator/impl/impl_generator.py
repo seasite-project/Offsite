@@ -54,8 +54,8 @@ class ImplCodeGenerator(ABC):
     loaded_templates = attr.ib(type=Dict, init=False)
     required_datastructs = attr.ib(type=DatastructDict, init=False)
 
-    def generate(self, skeleton: ImplSkeleton, impl_variants: List[Tuple[int]], ivp: Optional[IVP] = None,
-                 method: Optional[ODEMethod] = None) -> Dict[Path, str]:
+    def generate(self, skeleton: ImplSkeleton, impl_variants: List[Tuple[int]], use_tiling: bool,
+                 ivp: Optional[IVP] = None, method: Optional[ODEMethod] = None) -> Dict[Path, str]:
         """Generate implementation variant codes.
 
         Parameters:
@@ -95,7 +95,7 @@ class ImplCodeGenerator(ABC):
         # Optimize tree: unroll
         self._unroll_tree(code_tree)
         # Generate code from tree and write to string.
-        tiled_str: str = 'tiled ' if config.args.tile else ''
+        tiled_str: str = 'tiled ' if use_tiling else ''
         codes: Dict[Path, str] = dict()
         for vid, variant in impl_variants:
             # Generate required kernel codes.
@@ -105,8 +105,8 @@ class ImplCodeGenerator(ABC):
             if config.args.verbose:
                 print('Generating {}implementation variant {} (id = {})'.format(tiled_str, variant_name, vid))
             # Generate implementation variant.
-            name = Path('{}/{}.h'.format(self.folder_impl, create_variant_name(kernels, skeleton.name)))
-            codes[name] = self._generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, config.args.tile)
+            name = Path('{}/{}.h'.format(self.folder_impl, variant_name))
+            codes[name] = self._generate_impl_variant(code_tree, vid, kernels, skeleton, method, ivp, use_tiling)
         return codes
 
     def _collect_loop_meta_data(self, node: CodeNode):

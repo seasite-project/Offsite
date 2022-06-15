@@ -4,10 +4,10 @@ Main script of the offsite_plot application.
 @author: Johannes Seiferth
 """
 
-from argparse import ArgumentParser, Namespace
 from datetime import datetime
 from enum import Enum
 
+from argparse import ArgumentParser, Namespace
 from matplotlib import pyplot
 from pandas import read_sql_query, DataFrame
 from sqlalchemy.orm import Session

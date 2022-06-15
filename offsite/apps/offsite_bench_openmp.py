@@ -5,15 +5,15 @@ Main script of the offsite_bench_openmp application.
 """
 
 from argparse import ArgumentParser, Namespace
-
 from pathlib2 import Path
 
 import offsite.config
 from offsite import __version__
-from offsite.config import __config_ext__, init_config, Config
+from offsite.config import init_config, Config
 from offsite.descriptions.machine import MachineState
 from offsite.train.communication.benchmark import BenchmarkType
 from offsite.train.communication.openmp.omp_barrier import OmpBarrierBenchmark
+from offsite.util.file_extensions import __config_ext__
 
 
 def parse_program_args_app_bench_openmp() -> Namespace:

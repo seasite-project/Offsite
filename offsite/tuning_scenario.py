@@ -12,9 +12,9 @@ from typing import List, Set
 import attr
 from pathlib2 import Path
 
-from offsite.config import __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, \
-    __tuning_scenario_ext__
 from offsite.solver import Solver, SolverType
+from offsite.util.file_extensions import __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, \
+    __ode_method_ext__, __tuning_scenario_ext__
 
 
 class MultiOrderedDict(OrderedDict):
@@ -164,7 +164,8 @@ class TuningScenario:
                 scenario_obj.method_path = set(Path(x) for x in parser[tag_method][tag_path].split('\n'))
                 if any((x.suffix != __ode_method_ext__ for x in scenario_obj.method_path)):
                     raise RuntimeError('Expected file ending: \'{}\' for ODE method!'.format(__ode_method_ext__))
-        if scenario_obj.solver.type == SolverType.ODE and scenario_obj.method_dir is None and scenario_obj.method_path is None:
+        if scenario_obj.solver.type == SolverType.ODE and scenario_obj.method_dir is None and \
+                scenario_obj.method_path is None:
             raise RuntimeError('Section [ODE METHOD] requires at least one of the following entries:\n'
                                '\"dir = MY_CUSTOM_PATH\" or \"path = \"MY_CUSTOM_PATH\"')
         # ... IVP.
@@ -178,7 +179,8 @@ class TuningScenario:
                 scenario_obj.ivp_path = set(Path(x) for x in parser[tag_ivp][tag_path].split('\n'))
                 if any((x.suffix != __ivp_ext__ for x in scenario_obj.ivp_path)):
                     raise RuntimeError('Expected file ending: \'{}\' for IVP!'.format(__ivp_ext__))
-        if scenario_obj.solver.type == SolverType.ODE and scenario_obj.ivp_dir is None and scenario_obj.ivp_path is None:
+        if scenario_obj.solver.type == SolverType.ODE and scenario_obj.ivp_dir is None and \
+                scenario_obj.ivp_path is None:
             raise RuntimeError('Section [IVP] requires at least one of the following entries:\n'
                                '\"dir = MY_CUSTOM_PATH\" or \"path = \"MY_CUSTOM_PATH\"')
         # ... YaskSite.

@@ -5,7 +5,6 @@ Utility functions to use the yasksite tool.
 """
 
 from os import environ
-from subprocess import run, PIPE, CalledProcessError
 from typing import Dict, List, Optional
 
 from pathlib2 import Path
@@ -15,6 +14,7 @@ from offsite.config import Config
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.ode import IVP, ODEMethod, ivp_system_size, corrector_steps, stages
 from offsite.util.math_utils import eval_math_expr
+from offsite.util.process_utils import run_process
 
 StringDict = Dict[str, str]
 FloatDict = Dict[int, float]
@@ -51,10 +51,7 @@ def execute_yasksite(kernel: Path, machine: MachineState, model: str, size_str: 
     # Execute yasksite.
     cmd = ['taskset', '-c', taskset_str, ys_exec, str(kernel), '-i', timesteps, '-s', size_str, '-o', ys_blocking,
            '-r', radius, ' -M', model, '-m', str(machine.path), '-b', str(stencil_file_path), ys_folding]
-    try:
-        return run(cmd, check=True, encoding='utf-8', stdout=PIPE).stdout
-    except CalledProcessError as error:
-        raise RuntimeError('yasksite failed: {}'.format(error))
+    return run_process(cmd)
 
 
 def execute_yasksite_ecm_mode(kernel: Path, machine: MachineState, method: Optional[ODEMethod], ivp: Optional[IVP],

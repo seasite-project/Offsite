@@ -5,27 +5,35 @@ Functions to train the tuning database with implementation variant predictions.
 """
 
 from copy import deepcopy
+from datetime import datetime
+from getpass import getuser
 from multiprocessing import cpu_count, Pool
+from statistics import mean
 from traceback import print_exc
 from typing import Dict, List, Optional, Tuple, Union
 
 from pandas import DataFrame, concat
+from pathlib2 import Path
 from sqlalchemy.orm import Session
 
 import offsite.config
+from offsite import __version__
+from offsite.codegen.codegen_util import write_code_to_file, write_codes_to_file
+from offsite.codegen.generator.impl.impl_generator_c import ImplCodeGeneratorC
 from offsite.config import Config, ModelToolType
 from offsite.database import commit
 from offsite.descriptions.impl.impl_skeleton import ImplSkeleton
 from offsite.descriptions.impl.kernel_template import Kernel
 from offsite.descriptions.machine import MachineState
-from offsite.descriptions.ode import IVP, ivp_grid_size, ODEMethod, corrector_steps, stages
+from offsite.descriptions.ode import IVP, ODEMethod, ivp_system_size, ivp_grid_size, corrector_steps, stages
 from offsite.train.communication.openmp.omp_barrier import OmpBarrierBenchmark
 from offsite.train.impl_variant import ImplVariant, ImplVariantRecord, fuse_equal_impl_records
 from offsite.train.node.util.communication_costs import compute_node_lvl_communication_costs
 from offsite.train.node.util.performance_model import compute_impl_variant_pred
 from offsite.train.train_utils import deduce_available_impl_variants, deduce_impl_variant_sample_intervals, \
     fetch_kernel_runtime_prediction_data
-from offsite.util.math_utils import eval_math_expr
+from offsite.util.math_utils import eval_math_expr, remove_outliers
+from offsite.util.process_utils import run_process
 from offsite.util.time import start_timer, stop_timer
 
 
@@ -124,7 +132,7 @@ def __push_train_impl_tasks(db_session: Session, pool: Pool, machine: MachineSta
     # Compute implementation variant prediction
     # ... remove old, (possibly obsolete) impl variant records from the database.
     ImplVariantRecord.remove_records(db_session, impl_variant_ids, machine.db_id, machine.compiler.db_id, meth_id,
-                                     ivp_id, machine.clock, core_count)
+                                     ivp_id, machine.clock, core_count, 'MODEL')
     # ... fetch the kernel runtime prediction data from the database and
     pred_data = {cores: fetch_kernel_runtime_prediction_data(
         db_session, machine.db_id, machine.compiler.db_id, meth_id, ivp_id, cores, machine.clock, mode=None,
@@ -207,12 +215,13 @@ def compute_impl_variant_predictions(
                 for interval, data in deduce_impl_variant_sample_intervals(impl_pred_data).items():
                     # Compute the impl variant runtime prediction (in seconds) of this variant using the
                     # kernel runtime predictions of its kernels as well as its communication costs.
-                    pred = compute_impl_variant_pred(data, executions, comm_costs_variant[cores])
+                    pred: str = compute_impl_variant_pred(data, executions, comm_costs_variant[cores])
                     #
                     record = {'impl': impl.db_id, 'machine': machine.db_id, 'compiler': machine.compiler.db_id,
                               'method': method.db_id, 'ivp': ivp.db_id, 'cores': cores, 'frequency': frequency,
                               'first': interval.first, 'last': interval.last, 'prediction': str(pred),
-                              'mode': 'MODEL'}
+                              'pred_mode': 'MODEL', 'updatedIn': __version__,
+                              'updatedOn': datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'), 'updatedBy': getuser()}
                     records.append(record)
         return records
     except Exception as e:
@@ -220,3 +229,330 @@ def compute_impl_variant_predictions(
         print_exc()
         print('')
         raise e
+
+
+def train_impl_variant_runtimes(db_session: Session, machine: MachineState, skeletons: List[ImplSkeleton],
+                                methods: Optional[List[ODEMethod]] = None, ivps: Optional[List[IVP]] = None):
+    """Train database with benchmarked implementation variant runtimes.
+
+    Parameters:
+    -----------
+    db_session: sqlalchemy.orm.session.Session
+        Used database session.
+    machine: MachineState
+        Used machine.
+    skeletons: List of ImplSkeleton
+        Trained ImplSkeleton objects.
+    methods: List of ODEMethod.
+        Used ODe methods.
+    ivps: List of IVP
+        Used IVPs.
+
+    Returns:
+    --------
+    -
+    """
+    config: Config = offsite.config.offsiteConfig
+    n: int = config.args.ode_size
+    cores: int = config.args.cores
+    # TODO kmp_affinity
+    # TODO check if ODE size is applicable.
+
+    # Write header file and main benchmark source code file.
+    folder: Path = Path('tmp/bench_variants')
+    _write_bench_utils_header(folder)
+    bench_src_stub: str = _write_impl_bench_main_code()
+
+    # Initialize implementation variant code generator.
+    codegen: ImplCodeGeneratorC = ImplCodeGeneratorC(db_session, folder, folder, folder)
+
+    # Pin CPU frequency for benchmarking.
+    if config.args.verbose:
+        print('\nPinning CPU frequency to {} Hz for implementation variant benchmark.'.format(machine.clock))
+    # MachineState.pin_cpu_frequency(machine.clock)
+
+    # Benchmark the implementation variant runtimes for all implementation skeletons:
+    records: List[ImplVariantRecord] = list()
+    for skeleton in skeletons:
+        # ... determine all available impl variants and store in database.
+        available_variants, _ = deduce_available_impl_variants(db_session, skeleton, False)
+        impl_variants: List[ImplVariant] = [impl.to_database(db_session) for impl in available_variants]
+        if not impl_variants:
+            continue
+        impl_variants_kernels = [(impl.db_id, impl.kernels) for impl in impl_variants]
+        print(impl_variants_kernels)
+        for ivp in ivps:
+            if not ivp.characteristic.isStencil and skeleton.modelTool == ModelToolType.YASKSITE:
+                continue
+            if skeleton.modelTool is not ivp.modelTool:
+                continue
+            for method in methods:
+                # Generate instrumented implementation variant code.
+                codes = codegen.generate(skeleton, impl_variants_kernels, False, ivp, method)
+                write_codes_to_file(codes, suffix='')
+
+                # Benchmark implementation variants.
+                records: List[Dict] = list()
+                for impl in impl_variants:
+                    # Write specific benchmark file for this implementation variant.
+                    variant_name: str = ImplVariant.fetch_impl_variant_name(db_session, impl.db_id)
+                    bench_src: str = bench_src_stub.replace('VARIANT_HEADER', '"{}.h"'.format(variant_name))
+                    bench_file: Path = write_code_to_file(bench_src, 'bench_impl', folder)
+
+                    # Compile code.
+                    binary: Path = folder / Path('bench.out')
+                    # Construct compiler call.
+                    cmd: List[str] = [machine.compiler.name]
+                    cmd.extend((flag for flag in machine.compiler.flags.split(' ')))
+                    cmd.append(str(bench_file))
+                    cmd.append('-Dn={}'.format(n))
+                    cmd.append('-Dg={}'.format(eval_math_expr(ivp.gridSize, [ivp_system_size(n)], cast_to=int)))
+                    cmd.append('-lm')
+                    cmd.append('-o{}'.format(binary))
+                    # Compile.
+                    run_process(cmd)
+
+                    # Run benchmark for current configuration.
+                    cmd = ['./{}'.format(binary), str(config.repetitions_implementation_variants), str(cores)]
+                    output: str = run_process(cmd)
+
+                    # Process benchmark results.
+                    times: List[float] = remove_outliers([float(x) for x in output.split('\n') if x != ''])
+                    runtime: float = mean(times)
+                    runtime_per_component: str = eval_math_expr('{} * n'.format(runtime / n), cast_to=str)
+                    # ... and store them.
+                    record = {'impl': impl.db_id, 'machine': machine.db_id, 'compiler': machine.compiler.db_id,
+                              'method': method.db_id, 'ivp': ivp.db_id, 'cores': cores, 'frequency': machine.clock,
+                              'first': n, 'last': n, 'prediction': runtime_per_component, 'pred_mode': 'BENCH',
+                              'updatedIn': __version__, 'updatedOn': datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
+                              'updatedBy': getuser()}
+                    records.append(record)
+        commit(db_session)
+
+    # Reset CPU frequency limits after benchmarking.
+    if config.args.verbose:
+        print('\nResetting CPU frequency limits after implement variant benchmark')
+    # MachineState.reset_cpu_frequency_limits()
+
+    # Train database with implementation variant runtimes.
+    records_df: DataFrame = DataFrame(records)
+    ImplVariantRecord.update(db_session, records_df)
+    # Commit to database.
+    commit(db_session)
+
+
+def _write_impl_bench_main_code() -> str:
+    # Write header includes.
+    code = '#include <omp.h>\n'
+    code += '#include <stdio.h>\n'
+    code += '#include "offsite_util.h"\n'
+    code += '\n'
+    code += '#include VARIANT_HEADER\n'
+    code += '\n'
+    # Add main function code.
+    code += 'int main(int argc, char **argv) {\n'
+    code += 'int threads = atoi(argv[2]);\n'
+    code += '\n'
+    code += 'double times[atoi(argv[1])];\n'
+    code += '\n'
+    code += 'time_snap_t ts;\n'
+    code += '\n'
+    code += '#ifdef _OPENMP\n'
+    code += '#pragma omp parallel num_threads(threads)\n'
+    code += '{\n'
+    code += '#pragma omp single\n'
+    code += 'threads = omp_get_num_threads();\n'
+    code += '}\n'
+    code += '#else\n'
+    code += '{\n'
+    code += 'cpu_set_t mask;\n'
+    code += 'CPU_ZERO( & mask);\n'
+    code += 'CPU_SET(0, & mask);\n'
+    code += 'sched_setaffinity(0, sizeof(cpu_set_t), & mask);\n'
+    code += '}\n'
+    code += '#endif\n'
+    code += '\n'
+    code += 'allocate_data_structures();\n'
+    code += '\n'
+    code += 'initial_values(0.123, y);\n'
+    code += '\n'
+    code += 'init_time_snap();\n'
+    code += '\n'
+    # Open parallel region.
+    code += '#pragma omp parallel num_threads(threads)\n'
+    code += '{\n'
+    # Data distribution.
+    code += '#ifdef _OPENMP\n'
+    code += 'const int me = omp_get_thread_num();\n'
+    code += '# else\n'
+    code += 'const int me = 0;\n'
+    code += '#endif\n'
+    code += '\n'
+    code += 'const int first = me * n / threads;\n'
+    code += 'const int last = (me + 1) * n / threads - 1;\n'
+    code += '\n'
+    # Run benchmark.
+    code += '#pragma omp barrier\n'
+    code += 'for (int warmup = 1; warmup >= 0; --warmup)\n'
+    code += '{\n'
+    code += 'timestep(me, first, last, 1.234, 0.123);\n'
+    code += '}\n'
+    code += '\n'
+    code += 'int repeat = atoi(argv[1]);\n'
+    code += 'for (; repeat > 0; --repeat)\n'
+    code += '{\n'
+    code += '#pragma omp barrier\n'
+    code += 'if (me == 0)\n'
+    code += 'time_snap_start(&ts);\n'
+    code += '\n'
+    code += 'timestep(me, first, last, 1.234, 0.123);\n'
+    code += '#pragma omp barrier\n'
+    code += '\n'
+    code += 'if (me == 0)\n'
+    code += '{\n'
+    code += 'times[repeat-1] = time_snap_stop(&ts) / 1e9;\n'
+    code += '}\n'
+    code += '}\n'
+    code += '}\n'
+    code += '\n'
+    # Print results.
+    code += 'double total = 0.0;\n'
+    code += 'for (int i = 0; i < atoi(argv[1]); ++i)\n'
+    code += '{\n'
+    code += 'printf("%.15f\§n", times[i]);\n'
+    code += 'total += times[i] / (double) n;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'free_data_structures();\n'
+    code += '\n'
+    code += 'return 0;\n'
+    code += '}\n'
+    code += '\n'
+    return code
+
+
+def _write_bench_utils_header(folder: Path):
+    code = '#ifndef OFFSITE_UTIL_H_\n'
+    code += '#define OFFSITE_UTIL_H_\n'
+    code += '\n'
+    code += '#include <assert.h>\n'
+    code += '#include <stddef.h>\n'
+    code += '#include <stdint.h>\n'
+    code += '#include <stdlib.h>\n'
+    code += '#include <sys/time.h>\n'
+    code += '\n'
+    code += '#define ALIGNMENT 32\n'
+    code += '#define ALIGN(X, Y) ((unsigned long) ((((X) + (Y) - 1)/(Y)) * (Y)) % 256 < (Y) ? ((((X) + (Y) - 1)/(Y)) * (Y)) + (Y) : ((((X) + (Y) - 1)/(Y)) * (Y)))\n'
+    code += '\n'
+    code += 'inline void *aligned_malloc(size_t size, size_t align)\n'
+    code += '{\n'
+    code += 'void *result;\n'
+    code += '#if defined(__INTEL_COMPILER)\n'
+    code += 'result = _mm_malloc(size, align);\n'
+    code += '#else\n'
+    code += 'if (posix_memalign(&result, align, size)) result = 0;\n'
+    code += '#endif\n'
+    code += 'return result;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'double *alloc1d(size_t a)\n'
+    code += '{\n'
+    code += 'return (double *) aligned_alloc(ALIGNMENT, a * sizeof(double));\n'
+    code += '}\n'
+    code += '\n'
+    code += 'double **alloc2d(size_t a, size_t b)\n'
+    code += '{\n'
+    code += 'size_t i, row_size, row_count;\n'
+    code += 'double ** x;\n'
+    code += 'row_size = ALIGN(b * sizeof(double), ALIGNMENT);\n'
+    code += 'row_count = row_size / sizeof(double);\n'
+    code += 'x = (double **)\n'
+    code += 'aligned_alloc(ALIGNMENT, a * sizeof(double *)); \n'
+    code += 'x[0] = (double *)\n'
+    code += 'aligned_alloc(ALIGNMENT, a * row_size);\n'
+    code += 'for (i = 1; i < a; i++)\n'
+    code += 'x[i] = x[0] + i * row_count;\n'
+    code += 'return x;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'double ***alloc3d(size_t a, size_t b, size_t c)\n'
+    code += '{\n'
+    code += 'size_t i, row_size, row_count;\n'
+    code += 'double ***x;\n'
+    code += 'assert ((ALIGNMENT % sizeof(double)) == 0);\n'
+    code += 'row_size = ALIGN(c * sizeof(double), ALIGNMENT);\n'
+    code += 'row_count = row_size / sizeof(double);\n'
+    code += 'x = (double ** *)\n'
+    code += 'aligned_alloc(ALIGNMENT, a * sizeof(double **));\n'
+    code += 'x[0] = (double **)\n'
+    code += 'aligned_alloc(ALIGNMENT, a * b * sizeof(double *));\n'
+    code += 'x[0][0] = (double *)\n'
+    code += 'aligned_alloc(ALIGNMENT, a * b * row_size);\n'
+    code += 'for (i = 1; i < a; i++)\n'
+    code += 'x[i] = x[0] + i * b;\n'
+    code += 'for (i = 1; i < a * b; i++)\n'
+    code += 'x[0][i] = x[0][0] + i * row_count;\n'
+    code += 'return x;\n'
+    code += '}\n'
+    code += 'static void free1d(double * p)\n'
+    code += '{\n'
+    code += 'free((void *) p);\n'
+    code += '}\n'
+    code += '\n'
+    code += 'static void free2d(double ** p)\n'
+    code += '{\n'
+    code += 'free((void *) p[0]);\n'
+    code += 'free((void *) p);\n'
+    code += '}\n'
+    code += '\n'
+    code += 'static void free3d(double ** * p)\n'
+    code += '{\n'
+    code += 'free((void *) p[0][0]);\n'
+    code += 'free((void *) p[0]);\n'
+    code += 'free((void *) p);\n'
+    code += '}\n'
+    code += '\n'
+    code += 'typedef struct timeval time_snap_t;\n'
+    code += '\n'
+    code += '#define init_time_snap()\n'
+    code += '\n'
+    code += 'inline void time_snap_start(time_snap_t * ts)\n'
+    code += '{\n'
+    code += 'gettimeofday(ts, NULL);\n'
+    code += '}\n'
+    code += '\n'
+    code += 'inline uint64_t time_snap_stop(const time_snap_t * ts1)\n'
+    code += '{\n'
+    code += 'time_snap_t ts2;\n'
+    code += 'gettimeofday( & ts2, NULL);\n'
+    code += '\n'
+    code += 'return ((uint64_t)(ts2.tv_sec - ts1->tv_sec) * 1000000 + (uint64_t) ts2.tv_usec - (uint64_t) ts1->tv_usec) * 1000;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'inline double dmin(double a, double b)\n'
+    code += '{\n'
+    code += 'if (a < b) return a;\n'
+    code += 'else return b;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'inline double dmax(double a, double b)\n'
+    code += '{\n'
+    code += 'if (a < b) return b;\n'
+    code += 'else return a;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'inline double imin(int a, int b)\n'
+    code += '{\n'
+    code += 'if (a < b) return a;\n'
+    code += 'else return b;\n'
+    code += '}\n'
+    code += '\n'
+    code += 'inline int imax(int a, int b)\n'
+    code += '{\n'
+    code += 'if (a < b) return b;\n'
+    code += 'else return a;\n'
+    code += '}\n'
+    code += '\n'
+    code += '#endif\n'
+    # Write to file.
+    write_code_to_file(code, 'offsite_util', folder, suffix='.h')

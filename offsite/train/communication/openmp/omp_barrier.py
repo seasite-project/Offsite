@@ -2,7 +2,6 @@
 Definition of class OmpBarrierBenchmark.
 """
 
-from subprocess import run, PIPE, CalledProcessError
 from typing import Any, Dict, List, Tuple
 
 import attr
@@ -17,6 +16,7 @@ from offsite.descriptions.machine import MachineState
 from offsite.descriptions.parser import deserialize_obj, serialize_obj
 from offsite.train.communication.benchmark import Benchmark, BenchmarkRecord, BenchmarkType
 from offsite.util.math_utils import remove_outliers
+from offsite.util.process_utils import run_process
 
 
 @attr.s(hash=True)
@@ -75,14 +75,11 @@ class OmpBarrierBenchmark(Benchmark):
         for cores in range(1, machine.coresPerSocket + 1):
             run_config = {'freq': machine.clock, 'cores': cores}
             times: List[float] = list()
-            try:
-                for _ in range(1, repetitions + 1):
-                    cmd = ['./{}'.format(self.binary), str(cores), str(repetitions)]
-                    # Run benchmark for current configuration.
-                    runtime: str = run(cmd, check=True, encoding='utf-8', stdout=PIPE).stdout
-                    times.append(float(runtime))
-            except CalledProcessError as error:
-                print('OmpBarrierBenchmark failed: {}'.format(error))
+            for _ in range(1, repetitions + 1):
+                cmd = ['./{}'.format(self.binary), str(cores), str(repetitions)]
+                # Run benchmark for current configuration.
+                runtime: str = run_process(cmd)
+                times.append(float(runtime))
             # Remove outliers.
             times: List[float] = remove_outliers(times)
             # Runtime as mean of all times measured.

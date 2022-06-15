@@ -4,9 +4,9 @@ Main script of the offsite_db2name application.
 @author: Johannes Seiferth
 """
 
-from argparse import ArgumentParser, Namespace
 from enum import Enum
 
+from argparse import ArgumentParser, Namespace
 from sqlalchemy.orm import Session
 
 from offsite import __version__

@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session
 from offsite import __version__
 from offsite.codegen.code_dsl.code_dsl import parse_lark_grammar
 from offsite.codegen.code_dsl.code_tree import CodeTree, CodeTreeGenerator
-from offsite.config import ModelToolType, __impl_skeleton_ext__
+from offsite.config import ModelToolType
 from offsite.database import METADATA, insert
 from offsite.descriptions.impl.kernel_template import KernelTemplate
 from offsite.descriptions.parser import load_yaml, deserialize_obj, serialize_obj, ComputationDict
+from offsite.util.file_extensions import __impl_skeleton_ext__
 
 
 @attr.s

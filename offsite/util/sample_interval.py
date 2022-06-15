@@ -103,19 +103,17 @@ class SampleInterval:
 
 
 def create_samples_lower_border_working_set(
-        wset_start: int, wset_end: int, num_samples: int, step: float, ivp: IVP) -> Tuple[List[SampleInterval], int]:
-    """Create sample intervals in the upper border region of a working set.
+        wset_start: int, wset_end: int, num_samples: int, ivp: IVP) -> Tuple[List[SampleInterval], int]:
+    """Create sample intervals in the lower 20 percent border region of a working set.
 
     Parameters:
     -----------
     wset_start: int
-        Smallest system size of the working set.
+        The smallest system size of the working set.
     wset_end: int
-        Largest system size of the working set.
+        The largest system size of the working set.
     num_samples: int
         Number of sample intervals created.
-    step: float
-        Step between created sample intervals.
     ivp: IVP
         Used IVP.
 
@@ -124,8 +122,9 @@ def create_samples_lower_border_working_set(
     list of SampleInterval
         List of sample intervals.
     int
-        Highest system size above border region.
+        The highest system size above border region.
     """
+    assert wset_start <= wset_end
     config: Config = offsite.config.offsiteConfig
     sample_type: SampleType
     if config.args.mode == ProgramModeType.MODEL:
@@ -134,39 +133,49 @@ def create_samples_lower_border_working_set(
         sample_type = SampleType.BENCH_BORDER
     else:
         assert False
+    # Determine the end of the lower 20 percent interval and the length of the interval.
+    intv_20p: int = int(wset_start + 0.2 * (wset_end - wset_start + 1))
+    len_lower_20p: int = intv_20p - wset_start + 1
+
+    # The number of samples can not be bigger than the length of the interval to be sampled.
+    num_samples: int = min(num_samples, len_lower_20p)
+    # Determine the length of a sample interval ...
+    len_intv: int = int(len_lower_20p / num_samples)
+    # ... and the threshold to increase the length for the last 'longer_intv' samples.
+    longer_intv = len_lower_20p - num_samples * len_intv
+
+    # Determine 'start' and 'end' of the first sample interval...
+    end: int = intv_20p - 1
+    start: int = intv_20p - len_intv
+    # ... and create all intervals.
     samples: List[SampleInterval] = list()
-    # Ignore lower border for first working set. Too low values!
-    start: int = wset_start
-    if start == 1:
-        return samples, start
-    # Create samples in border region to previous working set.
-    for i in range(1, num_samples + 1):
-        end: int = min(int(wset_start * (1 + (i / step))), wset_end)
+    for i in reversed(range(1, num_samples + 1)):
+        # Create sample interval and sample point.
         point: int = SampleInterval(start, end, sample_type).median(ivp)
         if point:
             samples.append(SampleInterval(start, end, sample_type, point))
-            # Switch to start of next interval.
-            start = end + 1
-        # Reached end of working set.
-        if start > wset_end:
-            break
-    return samples, start
+            # Switch to next interval.
+            end = start - 1
+        # Increase the length of the next interval.
+        if i == longer_intv:
+            len_intv += 1
+        start -= len_intv
+    samples.reverse()
+    return samples, intv_20p
 
 
 def create_samples_upper_border_working_set(
-        wset_start: int, wset_end: int, num_samples: int, step: float, ivp: IVP) -> Tuple[List[SampleInterval], int]:
-    """Create sample intervals and points in the upper border region of a working set.
+        wset_start: int, wset_end: int, num_samples: int, ivp: IVP) -> Tuple[List[SampleInterval], int]:
+    """Create sample intervals and points in the upper 20 percent border region of a working set.
 
     Parameters:
     -----------
     wset_start: int
-        Smallest system size of the working set.
+        The smallest system size of the working set.
     wset_end: int
-        Largest system size of the working set.
+        The largest system size of the working set.
     num_samples: int
         Number of sample intervals created.
-    step: float
-        Step between created sample intervals.
     ivp: IVP
         Used IVP.
 
@@ -175,8 +184,9 @@ def create_samples_upper_border_working_set(
     list of SampleInterval
         List of sample intervals.
     int
-        Highest system size below border region.
+        The highest system size below border region.
     """
+    assert wset_start <= wset_end
     config: Config = offsite.config.offsiteConfig
     sample_type: SampleType
     if config.args.mode == ProgramModeType.MODEL:
@@ -185,20 +195,99 @@ def create_samples_upper_border_working_set(
         sample_type = SampleType.BENCH_BORDER
     else:
         assert False
+    # Determine the start of the upper 20 percent interval and the length of the interval.
+    intv_80p: int = int(wset_start + 0.8 * (wset_end - wset_start + 1))
+    len_upper_20perc: int = wset_end - intv_80p + 1
+
+    # The number of samples can not be bigger than the length of the interval to be sampled.
+    num_samples: int = min(num_samples, len_upper_20perc)
+    # Determine the length of a sample interval ...
+    len_intv: int = int(len_upper_20perc / num_samples)
+    # ... and the threshold to increase the length for the last 'longer_intv' samples.
+    longer_intv = len_upper_20perc - num_samples * len_intv
+
+    # Determine 'start' and 'end' of the first sample interval...
+    start: int = intv_80p + 1
+    end: int = intv_80p + len_intv
+    # ... and create all intervals.
     samples: List[SampleInterval] = list()
-    end: int = wset_end
-    # Create samples in border region to next working set.
-    for i in range(1, num_samples + 1):
-        start: int = max(int(wset_end * (1 - (i / step))), wset_start)
+    for i in reversed(range(1, num_samples + 1)):
+        # Create sample interval and sample point.
         point: int = SampleInterval(start, end, sample_type).median(ivp)
         if point:
             samples.append(SampleInterval(start, end, sample_type, point))
-            # Switch to end of previous interval.
+            # Switch to next interval.
+            start = end + 1
+        # Increase the length of the next interval.
+        if i == longer_intv:
+            len_intv += 1
+        end += len_intv
+    return samples, intv_80p
+
+
+def create_samples_border_memory_lvl(
+        wset_start: int, wset_end: int, num_samples: int, ivp: IVP) -> Tuple[List[SampleInterval], int]:
+    """Create sample intervals in the lower 20 percent border region of a working set.
+
+    Parameters:
+    -----------
+    wset_start: int
+        The smallest system size of the working set.
+    wset_end: int
+        The largest system size of the working set.
+    num_samples: int
+        Number of sample intervals created.
+    ivp: IVP
+        Used IVP.
+
+    Returns:
+    --------
+    list of SampleInterval
+        List of sample intervals.
+    int
+        The highest system size above border region.
+    """
+    assert wset_start <= wset_end
+    config: Config = offsite.config.offsiteConfig
+    sample_type: SampleType
+    if config.args.mode == ProgramModeType.MODEL:
+        sample_type = SampleType.MODEL_BORDER
+    elif config.args.mode == ProgramModeType.RUN:
+        sample_type = SampleType.BENCH_BORDER
+    else:
+        assert False
+    # Determine the end of the lower 20 percent interval and the length of the interval.
+    end_border_region: int = int(wset_start * 1.5)
+    if end_border_region > 0.05 * wset_end - wset_start + 1:
+        # Border region should not be bigger than 5% of the memory level.
+        end_border_region: int = int(0.05 * wset_end)
+    len_border_region = end_border_region - wset_start + 1
+
+    # The number of samples can not be bigger than the length of the interval to be sampled.
+    num_samples: int = min(num_samples, len_border_region)
+    # Determine the length of a sample interval ...
+    len_intv: int = int(len_border_region / num_samples)
+    # ... and the threshold to increase the length for the last 'longer_intv' samples.
+    longer_intv = len_border_region - num_samples * len_intv
+
+    # Determine 'start' and 'end' of the first sample interval...
+    end: int = end_border_region - 1
+    start: int = end_border_region - len_intv
+    # ... and create all intervals.
+    samples: List[SampleInterval] = list()
+    for i in reversed(range(1, num_samples + 1)):
+        # Create sample interval and sample point.
+        point: int = SampleInterval(start, end, sample_type).median(ivp)
+        if point:
+            samples.append(SampleInterval(start, end, sample_type, point))
+            # Switch to next interval.
             end = start - 1
-        # Switch to next working set once the end of the last interval from the lower border region was reached.
-        if start < wset_start:
-            break
-    return samples, end
+        # Increase the length of the next interval.
+        if i == longer_intv:
+            len_intv += 1
+        start -= len_intv
+    samples.reverse()
+    return samples, end_border_region
 
 
 def create_samples_memory_lvl(
@@ -208,7 +297,7 @@ def create_samples_memory_lvl(
     Parameters:
     -----------
     start: int
-        Smallest system size in the memory region.
+        The smallest system size in the memory region.
     num_samples: int
         Number of samples created.
     sample_offset: int

@@ -9,21 +9,22 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 import offsite.config
-from offsite.config import __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__, Config
+from offsite.config import Config
 from offsite.descriptions.impl.impl_skeleton import ImplSkeleton, parse_impl_skeletons
 from offsite.descriptions.impl.kernel_template import KernelTemplate, parse_kernel_templates
 from offsite.descriptions.machine import MachineState, parse_machine_state
 from offsite.descriptions.ode import IVP, ODEMethod, parse_ivp, parse_ivps, parse_methods
 from offsite.solver import SolverSpecificTableType
 from offsite.tuning_scenario import TuningScenario
+from offsite.util.file_extensions import __impl_skeleton_ext__, __ivp_ext__, __kernel_template_ext__, __ode_method_ext__
 
 
 def parse_verify_yaml_desc(db_session: Session, scenario: TuningScenario):
     """Parse and verify the YAML description files given by the user arguments.
 
     Parses and verifies the YAML descriptions given by the tuning scenario passed. For each description file
-    corresponding Python class objects are created (MachineState, ImplSkeleton, KernelTemplate, ...) and database records
-    are created.
+    corresponding Python class objects are created (MachineState, ImplSkeleton, KernelTemplate, ...) and database
+    records are created.
 
     Parameters:
     -----------

@@ -5,16 +5,26 @@ Definition of class Solver.
 """
 
 from datetime import datetime
+from enum import Enum
 from getpass import getuser
 from typing import List
 
 import attr
-from sqlalchemy import Column, DateTime, Enum, Integer, String, Table, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum as SQLEnum, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from offsite import __version__
-from offsite.config import SolverType, SolverSpecificTableType
 from offsite.database import METADATA, insert
+
+
+class SolverType(Enum):
+    GENERIC = 'GENERIC'
+    ODE = 'ODE'
+
+
+class SolverSpecificTableType(Enum):
+    IVP = 'IVP'
+    ODE_METHOD = 'ODE_METHOD'
 
 
 @attr.s
@@ -38,7 +48,7 @@ class Solver:
     db_table = Table('solver', METADATA,
                      Column('db_id', Integer, primary_key=True),
                      Column('name', String),
-                     Column('type', Enum(SolverType)),
+                     Column('type', SQLEnum(SolverType)),
                      Column('specific_tables_serial', String),
                      Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),

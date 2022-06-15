@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from getpass import getuser
-from subprocess import run, CalledProcessError
 from typing import Any, Dict, List
 
 import attr
@@ -20,6 +19,7 @@ from sqlalchemy.orm import Session
 from offsite import __version__
 from offsite.database import METADATA, insert
 from offsite.descriptions.machine import MachineState
+from offsite.util.process_utils import run_process
 
 
 class BenchmarkType(Enum):
@@ -98,15 +98,12 @@ class Benchmark(ABC):
         """
         self.binary = self.folder / Path('{}.out'.format(self.type.value))
         self.compiled_for = machine
-        try:
-            # Construct compiler call.
-            args = [machine.compiler.name, str(self.source), '-fopenmp', '-o{}'.format(self.binary)]
-            # Add compiler flags to call.
-            args.extend((flag for flag in machine.compiler.flags.split(' ')))
-            # Compile benchmark.
-            run(args, check=True)
-        except CalledProcessError as error:
-            raise RuntimeError('Failed to compile {}: {}'.format(self.type.value, error))
+        # Construct compiler call.
+        cmd = [machine.compiler.name, str(self.source), '-fopenmp', '-o{}'.format(self.binary)]
+        # Add compiler flags to call.
+        cmd.extend((flag for flag in machine.compiler.flags.split(' ')))
+        # Compile benchmark.
+        run_process(cmd)
 
     def binary_exists(self) -> bool:
         """Check if the benchmark's binary file exists.

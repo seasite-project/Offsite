@@ -7,7 +7,6 @@ Functions to train the tuning database with kernel predictions.
 from multiprocessing import cpu_count, Pool
 from os import putenv
 from statistics import mean
-from subprocess import run, CalledProcessError, PIPE
 from traceback import print_exc
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -16,11 +15,12 @@ from sqlalchemy.orm import Session
 
 import offsite.config
 from offsite.codegen.generator.kernel_bench_generator import KernelBenchFiles
-from offsite.config import Config, ModelToolType, ProgramModeType, SolverType
+from offsite.config import Config, ModelToolType, ProgramModeType
 from offsite.database import commit
 from offsite.descriptions.impl.kernel_template import Kernel, KernelTemplate, PModelKernel, KernelRecord, PModelRecord
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.ode import IVP, ODEMethod
+from offsite.solver import SolverType
 from offsite.train.node.util.kerncraft_utils import execute_kerncraft_bench_mode, execute_kerncraft_ecm_mode, \
     parse_kerncraft_output_bench_mode, parse_kerncraft_output_ecm_mode
 from offsite.train.node.util.performance_model import compute_pmodel_kernel_pred, compute_kernel_pred
@@ -28,6 +28,7 @@ from offsite.train.node.util.yasksite_utils import execute_yasksite_bench_mode, 
     parse_yasksite_output
 from offsite.train.train_utils import fuse_equal_records
 from offsite.util.math_utils import remove_outliers
+from offsite.util.process_utils import run_process
 from offsite.util.sample_interval import SampleInterval, SampleType
 from offsite.util.time import start_timer, stop_timer
 
@@ -62,7 +63,7 @@ def train_kernel(db_session: Session, machine: MachineState, templates: List[Ker
     if config.args.verbose:
         print('  * Kernel predictions...', end='', flush=True)
         ts = start_timer()
-    predicted_kernels: List[Kernel] = list()
+    predicted_kernels: Set[Kernel] = set()
     if config.args.mode == ProgramModeType.MODEL:
         if config.scenario.solver.type == SolverType.ODE:
             predicted_kernels = train_kernel_predictions_ode(db_session, machine, templates, methods, ivps)
@@ -763,30 +764,24 @@ def bench_rhs_kernel_runtime_ode(kernel: Kernel, machine: MachineState, method: 
     else:
         intervals = kernel.deduce_relevant_samples(machine, method, ivp)
     # Compile code.
-    binary = Path('tmp/a.out')
-    try:
-        # Construct compiler call.
-        args = [machine.compiler.name]
-        args.extend((flag for flag in machine.compiler.flags.split(' ')))
-        args.extend((str(code.kernel_src), str(code.dummy_src), str(code.main_src)))
-        args.append('-lm')
-        args.append('-o{}'.format(binary))
-        # Compile.
-        run(args, check=True)
-    except CalledProcessError as error:
-        raise RuntimeError('Failed to compile bench_{}: {}'.format(kernel.name, error))
+    binary: Path = Path('tmp/a.out')
+    # Construct compiler call.
+    cmd = [machine.compiler.name]
+    cmd.extend((flag for flag in machine.compiler.flags.split(' ')))
+    cmd.extend((str(code.kernel_src), str(code.dummy_src), str(code.main_src)))
+    cmd.append('-lm')
+    cmd.append('-o{}'.format(binary))
+    # Compile.
+    run_process(cmd)
     # Run benchmark.
     for cores in range(1, max_cores):
         putenv('OMP_NUM_THREADS', str(cores))
         for interval in intervals:
-            try:
-                args = ['./{}'.format(binary), str(config.repetitions_communication_operations), str(cores),
-                        str(interval.sample), str(method.stages)]
-                out = run(args, check=True, encoding='utf-8', stdout=PIPE).stdout
-            except CalledProcessError as error:
-                raise RuntimeError('Failed benchmark run of kernel {}: {}\n'.format(kernel.name, error))
+            cmd = ['./{}'.format(binary), str(config.repetitions_communication_operations), str(cores),
+                   str(interval.sample), str(method.stages)]
+            output = run_process(cmd)
             # Process benchmark results.
-            data = remove_outliers([float(x) for x in out.split('\n') if x != ''])
+            data = remove_outliers([float(x) for x in output.split('\n') if x != ''])
             kernel_runtimes[cores].append((interval, mean(data)))
     # We pass an empty dict here since we don't collect pmodel ECM records but use the same data formats.
     empty_dict = dict()

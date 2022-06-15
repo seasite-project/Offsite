@@ -13,7 +13,7 @@ from traceback import print_exc
 from typing import List, Optional, Set, Tuple, Union
 
 import attr
-from pandas import read_sql_query, DataFrame
+from pandas import read_sql_query, DataFrame, Series
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Query, Session
 
@@ -25,6 +25,7 @@ from offsite.descriptions.ode import IVP, ODEMethod
 from offsite.ranking.ranking_task import RankDeviationTask, RankOrderTask, RankTask, RankingCriteriaType, \
     RankingCutoffType
 from offsite.train.impl_variant import ImplVariant, ImplVariantRecord
+from offsite.util.math_utils import eval_math_expr
 from offsite.util.sample_interval import SampleInterval
 
 RankingData = List[Tuple[SampleInterval, List[int]]]
@@ -367,6 +368,14 @@ def create_rankings_ode(db_session: Session, machine: MachineState, methods: Lis
                     prediction_data = ImplVariantRecord.select(
                         db_session, impl_variants, machine.db_id, machine.compiler.db_id, method.db_id, ivp.db_id,
                         frequency, cores, ode_size)
+
+                    def __mean(series: Series) -> str:
+                        expr: str = series.to_string(header=False, index=False).replace('\n', '+').strip()
+                        return eval_math_expr('({})/{}'.format(expr, len(series)), cast_to=str)
+
+                    prediction_data = prediction_data.groupby(['impl', 'first', 'last']).aggregate(
+                        {'prediction': __mean})
+
                     if prediction_data.empty:
                         pool.close()
                         pool.join()
@@ -498,6 +507,14 @@ def create_rankings(db_session: Session, machine: MachineState,
         for cores in range(1, max_cores):
             prediction_data = ImplVariantRecord.select(db_session, impl_variants, machine.db_id,
                                                        machine.compiler.db_id, -100, -100, frequency, cores, ode_size)
+
+            def __mean(series: Series) -> str:
+                expr: str = series.to_string(header=False, index=False).replace('\n', '+').strip()
+                return eval_math_expr('({})/{}'.format(expr, len(series)), cast_to=str)
+
+            prediction_data = prediction_data.groupby(['impl', 'first', 'last']).aggregate(
+                {'prediction': __mean})
+
             if prediction_data.empty:
                 pool.close()
                 pool.join()

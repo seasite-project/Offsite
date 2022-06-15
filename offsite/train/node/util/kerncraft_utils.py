@@ -14,6 +14,7 @@ from offsite.config import Config
 from offsite.descriptions.machine import MachineState
 from offsite.descriptions.ode import IVP, ODEMethod, ivp_system_size, corrector_steps, stages
 from offsite.util.math_utils import eval_math_expr
+from offsite.util.process_utils import run_process
 
 
 def check_kerncraft_version():
@@ -28,7 +29,7 @@ def check_kerncraft_version():
     -
     """
     # Check kerncraft version.
-    kerncraft_version = run(['kerncraft', '--version'], check=True, encoding='utf-8', stdout=PIPE).stdout
+    kerncraft_version = run_process(['kerncraft', '--version'])
     # Split version number from kerncraft's version string.
     kerncraft_version_number = kerncraft_version.split(' ')[1].strip().split('.')
     # Split version number.
@@ -38,7 +39,7 @@ def check_kerncraft_version():
     # Check kerncraft version.
     required_kerncraft_version_major = 0
     required_kerncraft_version_minor = 8
-    required_kerncraft_version_micro = 12
+    required_kerncraft_version_micro = 13
     if required_kerncraft_version_major > kerncraft_version_major \
             or required_kerncraft_version_minor > kerncraft_version_minor \
             or required_kerncraft_version_micro > kerncraft_version_micro:

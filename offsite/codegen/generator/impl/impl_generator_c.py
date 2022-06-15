@@ -73,8 +73,7 @@ class ImplCodeGeneratorC(ImplCodeGenerator):
         code = self._generate_implementation_code(impl, kernels, method, gen_tiled_code)
         # Write frame code.
         return self._write_skeleton_includes(variant_id, skeleton, method, ivp) + \
-               self._write_function_description() + self._write_instrument_impl(variant_id) + \
-               code + '}'
+               self._write_function_description() + self._write_instrument_impl(variant_id) + code + '}'
 
     def _write_skeleton_includes(self, variant_id: int, skeleton: ImplSkeleton, method: Optional[ODEMethod] = None,
                                  ivp: Optional[IVP] = None) -> str:

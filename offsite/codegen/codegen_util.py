@@ -8,7 +8,6 @@ from multiprocessing import cpu_count, Pool
 from re import sub
 from shlex import split as shlex_split
 from shutil import which
-from subprocess import run, PIPE, CalledProcessError
 from sys import maxsize as sys_maxsize
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -17,6 +16,7 @@ from pathlib2 import Path
 import offsite.config
 from offsite.config import Config
 from offsite.util.math_utils import eval_math_expr
+from offsite.util.process_utils import run_process
 
 # Indention used for code formatting.
 INDENTION = '  '
@@ -347,11 +347,7 @@ def format_codefile(path: Path):
     -
     """
     if which('indent'):
-        try:
-            cmd = ['indent', '{}'.format(path)]
-            run(cmd, check=True, stdout=PIPE).stdout
-        except CalledProcessError as error:
-            raise RuntimeWarning('Formatting file {} with indent failed: {}'.format(path, error))
+        run_process(['indent', '{}'.format(path)])
 
 
 def write_codes_to_file(codes: Dict[str, str], folder: Path = None, suffix: str = '.c', num_workers: int = sys_maxsize,
@@ -432,18 +428,10 @@ def write_code_to_file(
         file_path = folder / file_path
     with file_path.open('w') as file_handle:
         file_handle.write(code_str)
-    # Replace newline characters in printf commands.
-    try:
-        cmd = ['sed', '-i', 's/§n/n/g', '{}'.format(file_path)]
-        run(cmd, check=True, stdout=PIPE).stdout
-    except CalledProcessError as error:
-        raise RuntimeError('Unable to substitute newline character stubs in {}: {}'.format(file_path, error))
-    # Replace tabulator characters in printf commands.
-    try:
-        cmd = ['sed', '-i', 's/§t/t/g', '{}'.format(file_path)]
-        run(cmd, check=True, stdout=PIPE).stdout
-    except CalledProcessError as error:
-        raise RuntimeError('Unable to substitute tabulator character stubs in {}: {}'.format(file_path, error))
+    # Replace newline and tabulator characters in printf commands.
+    # TODO: Is there a Python solution for this?
+    run_process(['sed', '-i', 's/§n/n/g', '{}'.format(file_path)])
+    run_process(['sed', '-i', 's/§t/t/g', '{}'.format(file_path)])
     # Format code file.
     if format_code:
         format_codefile(file_path)

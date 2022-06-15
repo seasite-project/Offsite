@@ -243,7 +243,7 @@ class ImplVariantRecord:
                      Column('first', Integer),
                      Column('last', Integer),
                      Column('prediction', String),
-                     Column('mode', String),
+                     Column('pred_mode', String),
                      Column('updatedIn', String, default=__version__),
                      Column('updatedOn', DateTime, default=datetime.now, onupdate=datetime.now),
                      Column('updatedBy', String, default=getuser(), onupdate=getuser()),
@@ -338,7 +338,7 @@ class ImplVariantRecord:
 
     @staticmethod
     def remove_records(db_session: Session, impls: List[int], machine: int, compiler: int, method: int, ivp: int,
-                       frequency: float, core_counts: List[int]):
+                       frequency: float, core_counts: List[int], mode: str):
         """Remove impl variant data record(s) from the database.
 
          Remove all records that match the provided configuration of machine, compiler, ODE method, IVP, CPU frequency
@@ -362,6 +362,8 @@ class ImplVariantRecord:
             Used CPU frequency.
         core_counts: List of int
             Used core counts.
+        mode: str
+            Application mode used to obtain data.
 
         Returns:
         --------
@@ -371,7 +373,8 @@ class ImplVariantRecord:
             ImplVariantRecord.impl.in_(impls), ImplVariantRecord.machine.is_(machine),
             ImplVariantRecord.compiler.is_(compiler), ImplVariantRecord.method.is_(method),
             ImplVariantRecord.ivp.is_(ivp), ImplVariantRecord.frequency.is_(frequency),
-            ImplVariantRecord.cores.in_(core_counts)).delete(synchronize_session=False)
+            ImplVariantRecord.cores.in_(core_counts), ImplVariantRecord.pred_mode.is_(mode)).delete(
+            synchronize_session=False)
 
     @staticmethod
     def select(db_session: Session, impls: List[int], machine: int, compiler: int, method: int, ivp: int,
@@ -470,7 +473,10 @@ def __fuse_equal_impl_records(records: DataFrame) -> List[Dict]:
         return {'impl': int(ser.get('impl')), 'machine': int(ser.get('machine')), 'compiler': int(ser.get('compiler')),
                 'method': int(ser.get('method')), 'ivp': int(ser.get('ivp')), 'cores': int(ser.get('cores')),
                 'frequency': float(ser.get('frequency')), 'first': int(ser.get('first')), 'last': int(ser.get('last')),
-                'prediction': str(ser.get('prediction')), 'mode': str(ser.get('mode'))}
+                'prediction': str(ser.get('prediction')), 'pred_mode': str(ser.get('pred_mode')),
+                'updatedIn': str(ser.get('updatedIn')), 'updatedOn': str(ser.get('updatedOn')),
+                'updatedBy': str(ser.get('updatedBy'))
+                }
 
     fused_records: List[Dict] = list()
     try:

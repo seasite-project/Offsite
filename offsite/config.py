@@ -4,21 +4,14 @@ Configuration options of the off_tune application.
 @author: Johannes Seiferth
 """
 
-from argparse import Namespace
 from configparser import ConfigParser
 from enum import Enum
 from sys import version_info
 
 import attr
+from argparse import Namespace
 
-# File extension of input data files."""
-__bench_ext__ = '.bench'
-__config_ext__ = '.tune'
-__impl_skeleton_ext__ = '.impl'
-__ivp_ext__ = '.ivp'
-__kernel_template_ext__ = '.kernel'
-__ode_method_ext__ = '.ode'
-__tuning_scenario_ext__ = '.scenario'
+from offsite.tuning_scenario import TuningScenario
 
 
 class ProgramModeType(Enum):
@@ -60,16 +53,6 @@ class IncoreToolType(Enum):
     LLVMMCA = 'LLVM-MCA'
 
 
-class SolverType(Enum):
-    GENERIC = 'GENERIC'
-    ODE = 'ODE'
-
-
-class SolverSpecificTableType(Enum):
-    IVP = 'IVP'
-    ODE_METHOD = 'ODE_METHOD'
-
-
 @attr.s
 class Config:
     """Representation of a Config object.
@@ -79,11 +62,11 @@ class Config:
     """
     # Program arguments
     args = attr.ib(type=Namespace)
+    scenario = attr.ib(type=TuningScenario, default=None)
     # Configuration options ...
     # ... for working sets
     available_cache_size = attr.ib(type=float, default=0.99)
     samples_per_border = attr.ib(type=int, default=2)
-    step_between_border_samples = attr.ib(type=float, default=100)
     samples_per_interval = attr.ib(type=int, default=2)
     samples_border_region_memory_lvl = attr.ib(type=int, default=5)
     samples_memory_lvl = attr.ib(type=int, default=5)
@@ -92,6 +75,7 @@ class Config:
     layer_condition_safety_margin = attr.ib(type=float, default=2.0)
     # ... for benchmarking
     repetitions_communication_operations = attr.ib(type=int, default=100)
+    repetitions_implementation_variants = attr.ib(type=int, default=10)
     # ... for code generation
     var_idx = attr.ib(type=str, default='j')
     yasksite_stencil_dir = attr.ib(type=str, default='examples/ivps/yasksite_stencils')
@@ -127,6 +111,8 @@ class Config:
             parser.read(str(path))
         # Program arguments
         config_obj.args = args
+        if 'scenario' in vars(args):
+            config_obj.scenario = TuningScenario.from_file(args.scenario)
         # Parse configuration options for...
         # ... working sets.
         tag_ws = 'WORKING SETS'
@@ -137,9 +123,6 @@ class Config:
             tag_samples = 'SamplesPerBorderRegion'
             if tag_samples in parser[tag_ws]:
                 config_obj.samples_per_border = int(parser[tag_ws][tag_samples])
-            tag_step = 'StepBetweenBorderSamples'
-            if tag_step in parser[tag_ws]:
-                config_obj.step_between_border_samples = float(parser[tag_ws][tag_step])
             tag_interval = 'SamplesPerInterval'
             if tag_interval in parser[tag_ws]:
                 config_obj.samples_per_interval = int(parser[tag_ws][tag_interval])
@@ -164,6 +147,9 @@ class Config:
             tag_comm = 'RepetitionsCommunicationOperations'
             if tag_comm in parser[tag_bench]:
                 config_obj.repetitions_communication_operations = int(parser[tag_bench][tag_comm])
+            tag_impl = 'RepetitionsImplementationVariants'
+            if tag_impl in parser[tag_bench]:
+                config_obj.repetitions_implementation_variants = int(parser[tag_bench][tag_impl])
         # ... code generation.
         tag_codegen = 'CODEGEN'
         if tag_codegen in parser:

@@ -1,4 +1,4 @@
-"""@package train.node.util.node_communication
+"""@package train.node.util.communication_costs
 Functions to train the tuning database with communication costs.
 
 @author: Johannes Seiferth

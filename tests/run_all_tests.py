@@ -15,7 +15,7 @@ def run():
             'test_db_mapping',
             'test_database',
             'test_math_utils',
-            # 'test_sample_interval', TODO
+            'test_sample_interval',
             # Folder descriptions.
             'test_parser',
             'test_parser_util',

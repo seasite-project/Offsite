@@ -5,7 +5,6 @@ Main script of the offsite_codegen application.
 """
 
 from argparse import ArgumentParser, Namespace
-
 from pathlib2 import Path
 
 import offsite.config
@@ -13,7 +12,7 @@ from offsite import __version__
 from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.generator.impl import make_impl_code_generator, GeneratedCodeLanguageType
 from offsite.codegen.generator.impl.impl_generator import ImplCodeGenerator
-from offsite.config import __config_ext__, init_config, Config, ModelToolType
+from offsite.config import init_config, Config, ModelToolType
 from offsite.database import commit, open_db
 from offsite.database.db_mapping import mapping
 from offsite.descriptions.impl.impl_skeleton import ImplSkeleton
@@ -22,6 +21,7 @@ from offsite.descriptions.ode import IVP, ODEMethod
 from offsite.ranking.ranking import create_rankings_ode, RankingRecord
 from offsite.ranking.ranking_task import parse_ranking_tasks
 from offsite.train.impl_variant import ImplVariant
+from offsite.util.file_extensions import __config_ext__
 
 
 def parse_program_args_app_codegen() -> Namespace:
@@ -197,7 +197,7 @@ def run_code_generation():
     codegen: ImplCodeGenerator = make_impl_code_generator(
         config.args.mode, db_session, folder_impl, folder_ivp, folder_method, folder_ds)
     for skeleton in skeletons.values():
-        codes = codegen.generate(skeleton[0], skeleton[1], ivp, method)
+        codes = codegen.generate(skeleton[0], skeleton[1], config.args.tile, ivp, method)
         write_codes_to_file(codes, suffix='')
 
 

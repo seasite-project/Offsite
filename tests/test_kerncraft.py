@@ -59,7 +59,7 @@ class TestKerncraft(TestCase):
                                 expected_results = self.results_ecm[str(path)][method.name][ivp.name]
                                 self._test_ecm_mode(path, method, ivp, expected_results)
                                 # Test bench mode.
-                                expected_results = self.results_bench[str(path)][method.name][ivp.name]
+                                # expected_results = self.results_bench[str(path)][method.name][ivp.name]
                                 # self._test_bench_mode(path, method, ivp, expected_results)
                                 # Test LC mode.
                                 expected_results = self.results_lc[str(path)][method.name][ivp.name]

@@ -5,7 +5,6 @@ Main script of the offsite_kernel2csv application.
 """
 
 from argparse import ArgumentParser, Namespace
-
 from pandas import read_sql_query, DataFrame
 from sqlalchemy.orm import Session
 

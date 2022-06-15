@@ -7,7 +7,6 @@ Definition of class MachineState and Machine.
 from ctypes import sizeof, c_double
 from datetime import datetime
 from getpass import getuser
-from subprocess import run, CalledProcessError
 
 import attr
 # noinspection PyUnresolvedReferences
@@ -23,6 +22,7 @@ from offsite.config import Config
 from offsite.database import METADATA, insert
 from offsite.descriptions.machine.compiler import Compiler
 from offsite.descriptions.parser import load_yaml
+from offsite.util.process_utils import run_process
 
 
 @attr.s
@@ -286,34 +286,20 @@ class MachineState:
         assert lower_limit <= upper_limit
         if lower_limit == upper_limit:
             return MachineState.pin_cpu_frequency(lower_limit)
-        try:
-            # Set minimal CPU frequency.
-            cmd = [config.likwid_set_frequencies, '-x', str(lower_limit)]
-            run(cmd, check=True)
-            # Set maximal CPU frequency.
-            cmd = [config.likwid_set_frequencies, '-y', str(upper_limit)]
-            run(cmd, check=True)
-        except CalledProcessError as err:
-            raise RuntimeWarning('Failed to limit CPU frequency to range \'{}\' to \'{}\': {}'.format(
-                lower_limit, upper_limit, err))
+        # Set minimal ...
+        run_process([config.likwid_set_frequencies, '-x', str(lower_limit)])
+        # ... and maximal CPU frequency.
+        run_process([config.likwid_set_frequencies, '-y', str(upper_limit)])
 
     @staticmethod
     def reset_cpu_frequency_limits():
         config: Config = offsite.config.offsiteConfig
-        try:
-            cmd = [config.likwid_set_frequencies, '-reset']
-            run(cmd, check=True)
-        except CalledProcessError as err:
-            raise RuntimeWarning('Failed to reset CPU frequency to its default range: {}'.format(err))
+        run_process([config.likwid_set_frequencies, '-reset'])
 
     @staticmethod
     def pin_cpu_frequency(frequency: float):
         config: Config = offsite.config.offsiteConfig
-        try:
-            cmd = [config.likwid_set_frequencies, '-f', str(frequency)]
-            run(cmd, check=True)
-        except CalledProcessError as err:
-            raise RuntimeWarning('Failed to pin CPU frequency to \'{}\': {}'.format(frequency, err))
+        run_process([config.likwid_set_frequencies, '-f', str(frequency)])
 
 
 def parse_machine_state(machine_file: Path, compiler: str) -> MachineState:

@@ -141,6 +141,7 @@ def deduce_available_impl_variants(db_session: Session, skeleton: ImplSkeleton, 
     """
     # Fetch the kernel variant ids from the database.
     kernel_ids = dict()
+    tid = -1
     for connect in skeleton.connected_templates:
         tid = connect[0].db_id
         # Select IDs of all kernel associated with kernel template 'tid'.

@@ -15,9 +15,9 @@ from sqlalchemy.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.orm import Session
 
 from offsite import __version__
-from offsite.config import __ode_method_ext__
 from offsite.database import METADATA, insert
 from offsite.descriptions.parser import load_yaml
+from offsite.util.file_extensions import __ode_method_ext__
 
 
 @attr.s

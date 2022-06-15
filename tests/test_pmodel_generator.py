@@ -26,6 +26,7 @@ class TestPModelGenerator(TestCase):
         self.method = ODEMethod.from_yaml(Path('examples/methods/implicit/radauIIA7.ode'))
         self.templates = parse_kernel_templates(Path('examples/kernels/pirk'), None)
         self.templates.extend(parse_kernel_templates(Path('examples/kernels/pirk_ext'), None))
+
     def test_types(self):
         for template in self.templates:
             if template.isIVPdependent:

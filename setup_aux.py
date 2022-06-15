@@ -23,8 +23,8 @@ def find_version(*file_paths):
 
 
 setup(
-    name='offsite',
-    version=find_version('offsite', '__init__.py'),
+    name='offsite_aux',
+    version=find_version('offsite_aux', '__init__.py'),
 
     description='',
 
@@ -51,36 +51,27 @@ setup(
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
 
     packages=find_packages(exclude=['tests*']),
 
     install_requires=[
-        'argparse>=1.4.0',
-        'attrs>=21.4.0',
-        'kerncraft==0.8.13',
-        'lark-parser>=0.12.0',
-        'numpy>=1.21.6',
-        'osaca==0.4.8',
-        'pandas>=1.3.5',
-        'pathlib2>=2.3.7',
-        'pycparser==2.21',
-        'ruamel.yaml>=0.17.21',
-        'sqlalchemy>=1.4.37',
-        'sortedcontainers>=2.4.0',
-        'sympy>=1.10.1',
+        # 'graphviz>=0.14.0', -> offsite_decision_tree
+        'matplotlib>=3.5.2',
+        'offsite>=0.3.3',
+        # 'scikit-learn>=0.23.0', -> offsite_decision_tree
+        # 'sklearn', -> offsite_decision_tree
     ],
-    python_requires='>=3.7,<3.10',
+    python_requires='>=3.7',
 
     entry_points={
         'console_scripts': [
-            'offsite_bench_impl=offsite.apps.offsite_bench_impl:run',
-            'offsite_bench_openmp=offsite.apps.offsite_bench_openmp:run',
-            'offsite_codegen=offsite.apps.offsite_codegen_db:run',
-            'offsite_codegen_from_yaml=offsite.apps.offsite_codegen_yaml:run',
-            'offsite_gensolver=offsite.apps.offsite_gensolver:run',
-            'offsite_rank=offsite.apps.offsite_rank:run',
-            'offsite_tune_node=offsite.apps.offsite_tune_node:run',
+            # Auxiliary apps.
+            'offsite_aux_db2name=offsite.apps.auxiliary.offsite_db2name:run',
+            'offsite_aux_impl2csv=offsite.apps.auxiliary.offsite_impl2csv:run',
+            'offsite_aux_kernel2csv=offsite.apps.auxiliary.offsite_kernel2csv:run',
+            'offsite_aux_plot=offsite.apps.auxiliary.offsite_plot:run',
         ],
     }
 )

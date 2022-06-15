@@ -16,9 +16,10 @@ from sqlalchemy.orm import Session
 
 import offsite.config
 from offsite import __version__
-from offsite.config import Config, ModelToolType, __ivp_ext__
+from offsite.config import Config, ModelToolType
 from offsite.database import METADATA, insert
 from offsite.descriptions.parser import load_yaml, deserialize_obj, serialize_obj, ComponentDict, ConstantDict
+from offsite.util.file_extensions import __ivp_ext__
 from offsite.util.math_utils import solve_equation
 
 

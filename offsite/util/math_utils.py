@@ -1,5 +1,6 @@
 """@package util.math_utils
 Util mathematical functions.
+
 @author: Johannes Seiferth
 """
 

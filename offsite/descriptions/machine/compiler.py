@@ -6,7 +6,6 @@ Definition of class Compiler.
 
 from datetime import datetime
 from getpass import getuser
-from subprocess import PIPE, run
 from typing import Dict
 
 import attr
@@ -16,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from offsite import __version__
 from offsite.database import METADATA, insert
+from offsite.util.process_utils import run_process
 
 
 @attr.s
@@ -140,6 +140,6 @@ class Compiler:
         str
             Version string of the used compiler.
         """
-        version = run([compiler, '-dumpversion'], check=True, encoding='utf-8', stdout=PIPE).stdout
+        version = run_process([compiler, '-dumpversion'])
         # Strip trailing EOL characters.
         return version.rstrip()

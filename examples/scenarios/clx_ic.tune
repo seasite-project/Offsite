@@ -6,7 +6,6 @@ IncoreModel = IACA
 AvailableCacheSize = 0.99
 SamplesPerBorderRegion = 2
 SamplesPerInterval = 2
-StepBetweenBorderSamples = 100
 SamplesBorderRegionToMemoryLvl = 5
 SamplesMemoryLvl = 5
 MemoryLvlSampleOffset = 1.015

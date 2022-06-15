@@ -4,9 +4,9 @@ Main script of the offsite_codegen_from_yaml application.
 @author: Johannes Seiferth
 """
 
-from argparse import ArgumentParser, Namespace
 from os import remove
 
+from argparse import ArgumentParser, Namespace
 from pathlib2 import Path
 
 import offsite.config
@@ -14,7 +14,7 @@ from offsite import __version__
 from offsite.codegen.codegen_util import write_codes_to_file
 from offsite.codegen.generator.impl import make_impl_code_generator, GeneratedCodeLanguageType
 from offsite.codegen.generator.impl.impl_generator import ImplCodeGenerator
-from offsite.config import __config_ext__, __tuning_scenario_ext__, init_config, Config, ModelToolType
+from offsite.config import init_config, Config, ModelToolType
 from offsite.database import commit, open_db
 from offsite.database.db_mapping import mapping
 from offsite.descriptions.ode import IVP, ODEMethod
@@ -22,6 +22,7 @@ from offsite.descriptions.parser_util import parse_verify_yaml_desc
 from offsite.solver import SolverType
 from offsite.train.train_utils import deduce_available_impl_variants
 from offsite.tuning_scenario import TuningScenario
+from offsite.util.file_extensions import __config_ext__, __tuning_scenario_ext__
 
 
 def parse_program_args_app_codegen() -> Namespace:
@@ -130,7 +131,7 @@ def run_codegen_ode(db_session, ivps, methods, skeletons):
         commit(db_session)
         # ... and generate impl variant codes.
         impl_variants = [(impl.db_id, impl.kernels) for impl in available_variants]
-        codes = codegen.generate(skeleton, impl_variants, ivp, method)
+        codes = codegen.generate(skeleton, impl_variants, config.args.tile, ivp, method)
         write_codes_to_file(codes, suffix='')
     if config.args.db is None:
         remove('tmp_db_codegen_yaml_config.db')
@@ -152,7 +153,7 @@ def run_codegen_generic(db_session, skeletons):
         commit(db_session)
         # ... and generate impl variant codes.
         impl_variants = [(impl.db_id, impl.kernels) for impl in available_variants]
-        codes = codegen.generate(skeleton, impl_variants)
+        codes = codegen.generate(skeleton, impl_variants, config.args.tile)
         write_codes_to_file(codes, suffix='')
     if config.args.db is None:
         remove('tmp_db_codegen_yaml_config.db')
