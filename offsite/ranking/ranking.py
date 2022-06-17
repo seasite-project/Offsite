@@ -374,7 +374,7 @@ def create_rankings_ode(db_session: Session, machine: MachineState, methods: Lis
                         return eval_math_expr('({})/{}'.format(expr, len(series)), cast_to=str)
 
                     prediction_data = prediction_data.groupby(['impl', 'first', 'last']).aggregate(
-                        {'prediction': __mean})
+                        {'prediction': __mean}).reset_index().set_index('impl')
 
                     if prediction_data.empty:
                         pool.close()
@@ -513,7 +513,7 @@ def create_rankings(db_session: Session, machine: MachineState,
                 return eval_math_expr('({})/{}'.format(expr, len(series)), cast_to=str)
 
             prediction_data = prediction_data.groupby(['impl', 'first', 'last']).aggregate(
-                {'prediction': __mean})
+                {'prediction': __mean}).reset_index().set_index('impl')
 
             if prediction_data.empty:
                 pool.close()

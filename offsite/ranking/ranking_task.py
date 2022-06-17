@@ -88,7 +88,7 @@ class RankOrderTask(RankTask):
             num_variants = int(len(ranking) * (self.cutoff_value / 100.0))
         else:
             assert False
-        return [idx for idx, impl in ranking.head(num_variants).iterrows()]
+        return [int(idx) for idx, impl in ranking.head(num_variants).iterrows()]
 
 
 @attr.s
@@ -114,12 +114,11 @@ class RankDeviationTask(RankTask):
         ranking: DataFrame = sort_variants_by_performance(data, system_size)
         if self.cutoff_criteria == RankingCutoffType.TOP:
             # Return top [cutoffValue] implementation variants.
-            return [idx for idx, impl in ranking.head(int(self.cutoff_value)).iterrows()]
+            return [int(idx) for idx, impl in ranking.head(int(self.cutoff_value)).iterrows()]
         elif self.cutoff_criteria == RankingCutoffType.PERCENT:
             # Return all implementation variants within the tolerance.
             index_best_impl = ranking.head(1).index.values[0]
-            return [idx for idx, impl in ranking.iterrows() if (
-                percent_deviation(impl['prediction'], ranking.at[index_best_impl, 'prediction'])) <= self.cutoff_value]
+            return [int(idx) for idx, impl in ranking.iterrows() if (percent_deviation(impl['prediction'], ranking.at[index_best_impl, 'prediction'])) <= self.cutoff_value]
         else:
             assert False
 
