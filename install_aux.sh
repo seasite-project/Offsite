@@ -29,7 +29,7 @@ cd ${install_dir}
 git clone https://github.com/seasite-project/Offsite && cd Offsite && python -m build -nw && pip install --user dist/offsite*.whl
 
 # Install Offsite auxiliary apps.
-ls && cd offsite_aux && python -m build -nw && pip install --user dist/offsite*.whl
+cd offsite_aux && python -m build -nw && pip install --user dist/offsite*.whl
 
 # Attention!
 echo ""
