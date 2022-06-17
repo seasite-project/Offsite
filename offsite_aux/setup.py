@@ -24,7 +24,7 @@ def find_version(*file_paths):
 
 setup(
     name='offsite_aux',
-    version=find_version('offsite_aux', '__init__.py'),
+    version=find_version('__init__.py'),
 
     description='',
 
@@ -57,21 +57,18 @@ setup(
     packages=find_packages(exclude=['tests*']),
 
     install_requires=[
-        # 'graphviz>=0.14.0', -> offsite_decision_tree
         'matplotlib>=3.5.2',
-        'offsite>=0.3.3',
-        # 'scikit-learn>=0.23.0', -> offsite_decision_tree
-        # 'sklearn', -> offsite_decision_tree
+        'Offsite @ http://github.com/seasite-project/Offsite/tarball/v0.3.4',
     ],
     python_requires='>=3.7',
 
     entry_points={
         'console_scripts': [
             # Auxiliary apps.
-            'offsite_aux_db2name=offsite.apps.auxiliary.offsite_db2name:run',
-            'offsite_aux_impl2csv=offsite.apps.auxiliary.offsite_impl2csv:run',
-            'offsite_aux_kernel2csv=offsite.apps.auxiliary.offsite_kernel2csv:run',
-            'offsite_aux_plot=offsite.apps.auxiliary.offsite_plot:run',
+            'offsite_aux_db2name=offsite_aux.apps.offsite_db2name:run',
+            'offsite_aux_impl2csv=offsite_aux.apps.auxiliary.offsite_impl2csv:run',
+            'offsite_aux_kernel2csv=offsite_aux.apps.auxiliary.offsite_kernel2csv:run',
+            'offsite_aux_plot=offsite.apps.offsite_plot:run',
         ],
     }
 )

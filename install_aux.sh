@@ -19,7 +19,7 @@ mkdir -p ${install_dir}
 cd ${install_dir}
 
 # Install kerncraft.
-git clone https://github.com/RRZE-HPC/kerncraft && cd kerncraft && git checkout v0.8.13 && python3 python -m build -nw && pip install --user dist/kerncraft*.whl
+git clone https://github.com/RRZE-HPC/kerncraft && cd kerncraft && git checkout v0.8.13 && python -m build -nw && pip install --user dist/kerncraft*.whl
 
 # Install IACA (required by kerncraft).
 iaca_get --I-accept-the-Intel-What-If-Pre-Release-License-Agreement-and-please-take-my-soul
@@ -27,6 +27,9 @@ iaca_get --I-accept-the-Intel-What-If-Pre-Release-License-Agreement-and-please-t
 # Install Offsite.
 cd ${install_dir}
 git clone https://github.com/seasite-project/Offsite && cd Offsite && python -m build -nw && pip install --user dist/offsite*.whl
+
+# Install Offsite auxiliary apps.
+ls && cd offsite_aux && python -m build -nw && pip install --user dist/offsite*.whl
 
 # Attention!
 echo ""

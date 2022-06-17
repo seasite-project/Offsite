@@ -9,11 +9,15 @@ See [install.sh](https://github.com/seasite-project/Offsite/blob/master/install.
 
 * `pip install --user wheel` (Make sure wheel is installed)
 * `pip install --user build` (Make sure build is installed)
-* `git clone https://github.com/RRZE-HPC/kerncraft && cd kerncraft` 
-* `python3 -m build -n -w && pip install --user dist/kerncraft*.whl` (Replace * with the used kerncraft version; current Offsite version requires kerncraft version 0.8.11.dev0 or higher)
+* `git clone https://github.com/RRZE-HPC/kerncraft && cd kerncraft && git checkout v0.8.13`
+* `python3 -m build -n -w && pip install --user dist/kerncraft*.whl` (Replace * with the used kerncraft version; current Offsite version requires kerncraft version 0.8.13)
 * `iaca_get --I-accept-the-Intel-What-If-Pre-Release-License-Agreement-and-please-take-my-soul` (IACA is required by kerncraft)
 * `git clone https://github.com/seasite-project/Offsite && cd Offsite`
 * `python3 -m build -n -w && pip install --user dist/offsite*.whl` (Replace * with the used Offsite version)
+
+Optional step to install some auxiliary apps.
+* `cd offsite_aux`
+* `python3 -m build -n -w && pip install --user dist/offsite_aux*.whl` (Replace * with the used Offsite version)
 
 
 ### External dependencies ###
